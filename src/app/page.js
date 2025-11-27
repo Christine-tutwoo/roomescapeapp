@@ -121,7 +121,6 @@ export default function EscapeRoomApp() {
   const [filterDateType, setFilterDateType] = useState('All'); 
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [showDemoBanner, setShowDemoBanner] = useState(true); 
 
   const [notification, setNotification] = useState({ show: false, msg: "", type: "success" });
   const [confirmModal, setConfirmModal] = useState({ show: false, eventId: null, action: null }); 
@@ -750,13 +749,27 @@ export default function EscapeRoomApp() {
   };
 
   const handleAddToCalendar = (ev) => {
-    // 簡單實作 Google Calendar 連結
-    const startTime = ev.date.replace(/-/g, '') + 'T' + ev.time.replace(':', '') + '00';
-    // 假設活動 2 小時，若有 endTime 則使用，否則預設 +2h
-    // 為了簡化，這裡暫時不精確計算結束時間，讀者可自行擴充
-    const endTime = ev.endTime ? ev.date.replace(/-/g, '') + 'T' + ev.endTime.replace(':', '') + '00' : startTime;
+    // 解析開始時間
+    const startDate = new Date(ev.date + 'T' + ev.time);
     
-    const details = `主揪: ${ev.host}\n地點: ${ev.location}\n備註: ${ev.description || '無'}`;
+    // 計算結束時間：開始時間 + 總時長（分鐘）
+    const durationMinutes = parseInt(ev.duration) || 120; // 預設 120 分鐘
+    const endDate = new Date(startDate.getTime() + durationMinutes * 60 * 1000);
+    
+    // 格式化為 Google Calendar 需要的格式 (YYYYMMDDTHHMMSS)
+    const formatDateTime = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${year}${month}${day}T${hours}${minutes}00`;
+    };
+    
+    const startTime = formatDateTime(startDate);
+    const endTime = formatDateTime(endDate);
+    
+    const details = `主揪: ${ev.host}\n地點: ${ev.location}\n備註: ${ev.description || '無'}\n遊玩時長: ${durationMinutes} 分鐘`;
     const url = `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(ev.title)}&dates=${startTime}/${endTime}&details=${encodeURIComponent(details)}&location=${encodeURIComponent(ev.location)}`;
     
     window.open(url, '_blank');
@@ -1074,19 +1087,6 @@ export default function EscapeRoomApp() {
        {showManageModal && <ManageParticipantsModal />}
 
        <header className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
-        {showDemoBanner && (
-          <div className="bg-indigo-600/20 px-4 py-2 text-xs text-indigo-200 flex items-start justify-between">
-            <div className="flex gap-2">
-              <Info size={16} className="text-indigo-400 shrink-0 mt-0.5" />
-              <span>
-                <strong className="text-indigo-300 block mb-0.5">目前為「體驗版」模式</strong>
-                資料僅暫存，重新整理後會重置。
-              </span>
-            </div>
-            <button onClick={() => setShowDemoBanner(false)} className="text-indigo-400 p-1 hover:text-white"><X size={14}/></button>
-          </div>
-        )}
-
         <div className="px-4 py-3 flex justify-between items-center">
           <h1 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent truncate max-w-[70%]">
             小迷糊密室逃脫揪團APP
@@ -1505,14 +1505,6 @@ export default function EscapeRoomApp() {
               </div>
 
               <div className="space-y-1.5">
-                  <label className="text-sm text-slate-400 font-medium">所在地區 <span className="text-red-500">*</span></label>
-                  <select required className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none"
-                    value={formData.region} onChange={e => setFormData({...formData, region: e.target.value})}>
-                    {['北部', '中部', '南部', '東部', '離島'].map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-              </div>
-
-              <div className="space-y-1.5">
                 <label className="text-sm text-slate-400 font-medium">工作室 <span className="text-red-500">*</span></label>
                 <input required type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
                   value={formData.studio} onChange={e => setFormData({...formData, studio: e.target.value})} />
@@ -1571,10 +1563,16 @@ export default function EscapeRoomApp() {
                 <label className="text-sm text-slate-400 font-medium">總人數 <span className="text-red-500">*</span></label>
                 <div className="relative">
                   <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
-                  <select required className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none appearance-none"
-                    value={formData.totalSlots} onChange={e => setFormData({...formData, totalSlots: Number(e.target.value)})}>
-                    {[4,5,6,7,8,10].map(n => <option key={n} value={n}>{n} 人</option>)}
-                  </select>
+                  <input 
+                    type="number" 
+                    required 
+                    min="2" 
+                    max="20"
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
+                    value={formData.totalSlots} 
+                    onChange={e => setFormData({...formData, totalSlots: Number(e.target.value) || 6})}
+                    placeholder="請輸入人數"
+                  />
                 </div>
               </div>
 
