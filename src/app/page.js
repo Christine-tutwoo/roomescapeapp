@@ -141,6 +141,8 @@ export default function EscapeRoomApp() {
   const [notification, setNotification] = useState({ show: false, msg: "", type: "success" });
   const [confirmModal, setConfirmModal] = useState({ show: false, eventId: null, action: null }); 
   const [showSponsorModal, setShowSponsorModal] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [imageModalUrl, setImageModalUrl] = useState("");
   const [showManageModal, setShowManageModal] = useState(false);
   const [managingEvent, setManagingEvent] = useState(null);
   const [isViewOnlyMode, setIsViewOnlyMode] = useState(false);
@@ -179,9 +181,10 @@ export default function EscapeRoomApp() {
               displayName: currentUser.displayName || "匿名玩家",
               email: currentUser.email,
               photoURL: currentUser.photoURL || "https://api.dicebear.com/7.x/ghost/svg?seed=" + currentUser.uid,
-      flakeCount: 0, 
-      isBanned: false 
-    };
+              flakeCount: 0, 
+              isBanned: false,
+              nameChangedCount: 0 // Initialize name change count
+            };
             await setDoc(userRef, userData, { merge: true });
           } else {
               // 更新登入時間或同步 Google 資料
@@ -189,7 +192,8 @@ export default function EscapeRoomApp() {
                   displayName: userData.displayName || currentUser.displayName || "匿名玩家", // 優先使用 DB 中的暱稱，若無則用 Google 的
                   photoURL: userData.photoURL || currentUser.photoURL || "https://api.dicebear.com/7.x/ghost/svg?seed=" + currentUser.uid,
                   email: currentUser.email,
-                  lastSeen: new Date()
+                  lastSeen: new Date(),
+                  nameChangedCount: userData.nameChangedCount || 0 // Ensure field exists
               }, { merge: true });
           }
 
@@ -202,8 +206,8 @@ export default function EscapeRoomApp() {
             displayName: currentUser.displayName || "使用者",
             email: currentUser.email,
             photoURL: currentUser.photoURL,
-            flakeCount: 0,
-            isBanned: false
+      flakeCount: 0, 
+      isBanned: false 
           });
           showToast("資料同步錯誤，部分功能可能受限", "error");
         }
@@ -387,13 +391,26 @@ export default function EscapeRoomApp() {
 
   const handleUpdateProfile = async () => {
     if (!user || !profileName.trim()) return;
+    
+    // Check if user has already changed name (limit 1)
+    if (user.nameChangedCount >= 1) {
+        showToast("您已經修改過一次暱稱，無法再次修改", "error");
+        setIsEditingProfile(false);
+        return;
+    }
+
     try {
         const userRef = doc(db, "users", user.uid);
         await updateDoc(userRef, {
-            displayName: profileName
+            displayName: profileName,
+            nameChangedCount: (user.nameChangedCount || 0) + 1
         });
         // 更新本地 user state，確保畫面即時反應
-        setUser(prev => ({ ...prev, displayName: profileName }));
+        setUser(prev => ({ 
+            ...prev, 
+            displayName: profileName,
+            nameChangedCount: (prev.nameChangedCount || 0) + 1
+        }));
         setIsEditingProfile(false);
         showToast("暱稱已更新", "success");
     } catch (error) {
@@ -681,6 +698,28 @@ export default function EscapeRoomApp() {
                >
                  我已贊助
                </button>
+            </div>
+         </div>
+      </div>
+    </div>
+  );
+
+  const ImageModal = () => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-950/90 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setShowImageModal(false)}>
+      <div className="bg-slate-900 w-full max-w-2xl rounded-3xl p-6 border border-slate-800 shadow-2xl relative overflow-hidden" onClick={(e) => e.stopPropagation()}>
+         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 to-cyan-500" />
+         
+         <button onClick={() => setShowImageModal(false)} className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white bg-slate-800/50 rounded-full transition-colors z-10">
+            <X size={20} />
+         </button>
+
+         <div className="text-center mt-2">
+            <div className="bg-white p-4 rounded-2xl inline-block shadow-lg max-w-full">
+               <img 
+                 src={imageModalUrl} 
+                 alt="優惠詳情" 
+                 className="max-w-full h-auto max-h-[70vh] object-contain rounded-lg"
+               />
             </div>
          </div>
       </div>
@@ -1109,7 +1148,7 @@ export default function EscapeRoomApp() {
         website: "", description: "", meetingTime: "15", duration: "120", minPlayers: 4,
         teammateNote: "", contactLineId: ""
       });
-      setActiveTab('lobby');
+    setActiveTab('lobby');
       // Reset Filters to ensure the new event is visible if it matches default logic
       setFilterCategory('All');
       setFilterRegion('All');
@@ -1217,6 +1256,8 @@ export default function EscapeRoomApp() {
        {showCalendar && <CalendarModal />}
        
        {showSponsorModal && <SponsorModal />}
+       
+       {showImageModal && <ImageModal />}
        
        {showManageModal && <ManageParticipantsModal />}
 
@@ -1542,7 +1583,15 @@ export default function EscapeRoomApp() {
                           <Clock size={12} className="mr-1" />
                           {promo.period}
                         </div>
-                        <button className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg border border-slate-700 transition-colors">
+                        <button 
+                          onClick={() => {
+                            if (promo.id === 2) { // 揪揪玩工作室
+                              setImageModalUrl("https://img.nextedge-ai-studio.com/S__10323406.jpg");
+                              setShowImageModal(true);
+                            }
+                          }}
+                          className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg border border-slate-700 transition-colors"
+                        >
                           查看詳情
                         </button>
                       </div>
@@ -1744,17 +1793,21 @@ export default function EscapeRoomApp() {
             <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 text-center relative overflow-hidden">
                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-cyan-500" />
                 
-                {/* 編輯個人資料按鈕 */}
+                {/* 編輯個人資料按鈕 (如果已經改過名字，就隱藏或變更行為，這裡選擇如果次數 >= 1 就顯示提示) */}
                 <button 
                     onClick={() => {
                         if (isEditingProfile) {
                             setIsEditingProfile(false);
                         } else {
+                            if (user.nameChangedCount >= 1) {
+                                showToast("您已經修改過一次暱稱，無法再次修改", "error");
+                                return;
+                            }
                             setProfileName(user.displayName);
                             setIsEditingProfile(true);
                         }
                     }}
-                    className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white bg-slate-800/50 rounded-full transition-colors"
+                    className={`absolute top-4 right-4 p-2 rounded-full transition-colors ${user.nameChangedCount >= 1 ? 'text-slate-600 cursor-not-allowed bg-slate-800/20' : 'text-slate-400 hover:text-white bg-slate-800/50'}`}
                 >
                     {isEditingProfile ? <X size={18}/> : <Settings size={18} />}
                 </button>
@@ -1767,6 +1820,7 @@ export default function EscapeRoomApp() {
 
                 {isEditingProfile ? (
                     <div className="animate-in fade-in duration-300 mb-4">
+                        <div className="text-xs text-yellow-500 mb-2">注意：暱稱只能修改一次</div>
                         <input 
                             type="text" 
                             value={profileName} 
@@ -1778,7 +1832,7 @@ export default function EscapeRoomApp() {
                             onClick={handleUpdateProfile}
                             className="px-4 py-1.5 bg-emerald-500 text-slate-900 text-sm font-bold rounded-lg hover:bg-emerald-400"
                         >
-                            儲存修改
+                            確認修改 (剩下 0 次機會)
                         </button>
                     </div>
                 ) : (
