@@ -1719,7 +1719,7 @@ export default function EscapeRoomApp() {
                     max="20"
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
                     value={formData.totalSlots} 
-                    onChange={e => setFormData({...formData, totalSlots: Number(e.target.value) || 6})}
+                    onChange={e => setFormData({...formData, totalSlots: e.target.value})}
                     placeholder="請輸入人數"
                   />
                 </div>
