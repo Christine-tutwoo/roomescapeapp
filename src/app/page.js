@@ -5,7 +5,7 @@ import { auth, googleProvider, db } from './firebase';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { 
   collection, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc,
-  onSnapshot, query, orderBy, arrayUnion, arrayRemove 
+  getDocs, query, orderBy, where, limit, startAfter, arrayUnion, arrayRemove 
 } from 'firebase/firestore';
 import { 
   Plus, Users, MapPin, Calendar, Clock, DollarSign, Ghost, Search, 
@@ -113,7 +113,11 @@ export default function EscapeRoomApp() {
   const [inWebView, setInWebView] = useState(false);
   const [user, setUser] = useState(null); 
   const [activeTab, setActiveTab] = useState('lobby'); 
-  const [events, setEvents] = useState([]); // 改為空陣列，等待 Firestore 資料
+  const [events, setEvents] = useState([]);
+  const [lastVisible, setLastVisible] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const EVENTS_PER_PAGE = 10;
   
   // 這些狀態現在改為從 events 和 user.uid 推導，但為了相容現有程式碼，
   // 我們稍後會用 useEffect 來更新它們，或者直接在 render 時計算。
@@ -212,19 +216,59 @@ export default function EscapeRoomApp() {
     return () => unsubscribe();
   }, []);
 
-  // --- Real-time Events Listener ---
-  useEffect(() => {
-    // 監聽 events 集合
-    const q = query(collection(db, "events"), orderBy("date", "asc"));
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const eventsData = [];
-      querySnapshot.forEach((doc) => {
-        eventsData.push({ id: doc.id, ...doc.data() });
-      });
-      setEvents(eventsData);
-    });
+  // --- 獲取活動資料 (分頁) ---
+  const fetchEvents = async (isLoadMore = false) => {
+    try {
+      if (isLoadMore) {
+        setLoadingMore(true);
+      }
+      
+      const todayStr = formatDate(new Date());
+      let q;
 
-    return () => unsubscribe();
+      if (isLoadMore && lastVisible) {
+        q = query(
+          collection(db, "events"),
+          where("date", ">=", todayStr),
+          orderBy("date", "asc"),
+          orderBy("time", "asc"),
+          startAfter(lastVisible),
+          limit(EVENTS_PER_PAGE)
+        );
+      } else {
+        q = query(
+          collection(db, "events"),
+          where("date", ">=", todayStr),
+          orderBy("date", "asc"),
+          orderBy("time", "asc"),
+          limit(EVENTS_PER_PAGE)
+        );
+      }
+
+      const querySnapshot = await getDocs(q);
+      const newEvents = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      // 更新 Pagination Cursor
+      const lastDoc = querySnapshot.docs[querySnapshot.docs.length - 1];
+      setLastVisible(lastDoc);
+      setHasMore(querySnapshot.docs.length === EVENTS_PER_PAGE);
+
+      if (isLoadMore) {
+        setEvents(prev => [...prev, ...newEvents]);
+      } else {
+        setEvents(newEvents);
+      }
+    } catch (error) {
+      console.error("Error fetching events:", error);
+      showToast("載入活動失敗", "error");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // 初始載入
+  useEffect(() => {
+    fetchEvents(false);
   }, []);
 
   // --- Sync My Events / Waitlists ---
@@ -883,6 +927,7 @@ export default function EscapeRoomApp() {
       // 2. 從 events 集合中移除
       await deleteDoc(doc(db, "events", id));
       showToast("揪團已關閉並封存", "success");
+      fetchEvents(false); // Refresh events
     } catch (error) {
       console.error("Error removing document: ", error);
       showToast("刪除失敗", "error");
@@ -1064,7 +1109,7 @@ export default function EscapeRoomApp() {
         website: "", description: "", meetingTime: "15", duration: "120", minPlayers: 4,
         teammateNote: "", contactLineId: ""
       });
-    setActiveTab('lobby');
+      setActiveTab('lobby');
       // Reset Filters to ensure the new event is visible if it matches default logic
       setFilterCategory('All');
       setFilterRegion('All');
@@ -1072,6 +1117,8 @@ export default function EscapeRoomApp() {
       setFilterMonth('All');
       setFilterDateType('All');
       setSelectedDateFilter(null);
+      // Refresh events to show the changes
+      fetchEvents(false);
     } catch (error) {
       console.error("Error adding/updating document: ", error);
       showToast("操作失敗: " + error.message, "error");
@@ -1433,8 +1480,8 @@ export default function EscapeRoomApp() {
                           查看已參加成員
                       </button>
 
-                      <button 
-                        disabled={isJoined || isWaitlisted}
+                    <button 
+                      disabled={isJoined || isWaitlisted}
                         onClick={() => promptJoin(ev.id)}
                       className={`w-full py-2.5 rounded-xl font-medium text-sm transition-all active:scale-95 flex items-center justify-center
                         ${isJoined 
@@ -1898,6 +1945,17 @@ export default function EscapeRoomApp() {
                     </div>
                   );
                 })
+              )}
+              
+              {/* Load More Button */}
+              {hasMore && (
+                <button 
+                  onClick={() => fetchEvents(true)}
+                  disabled={loadingMore}
+                  className="w-full py-3 rounded-xl bg-slate-800 text-slate-400 font-bold hover:bg-slate-700 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loadingMore ? '載入中...' : '載入更多活動'}
+                </button>
               )}
             </div>
           </div>
