@@ -98,8 +98,19 @@ const formatDate = (date) => {
   return `${year}-${month}-${day}`;
 };
 
+const isWebView = () => {
+  if (typeof window === 'undefined') return false;
+  const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+  const ua = userAgent.toLowerCase();
+  const isAndroidWebView = /android/.test(ua) && /wv/.test(ua);
+  const isSocialApp = /line|fban|fbav|instagram|micromessenger/.test(ua);
+  const isIosWebView = /iphone|ipod|ipad/.test(ua) && !/safari/.test(ua);
+  return isAndroidWebView || isSocialApp || isIosWebView;
+};
+
 export default function EscapeRoomApp() {
   // --- 全域狀態 ---
+  const [inWebView, setInWebView] = useState(false);
   const [user, setUser] = useState(null); 
   const [activeTab, setActiveTab] = useState('lobby'); 
   const [events, setEvents] = useState([]); // 改為空陣列，等待 Firestore 資料
@@ -119,6 +130,7 @@ export default function EscapeRoomApp() {
   const [searchQuery, setSearchQuery] = useState(''); // 新增搜尋狀態
 
   const [filterDateType, setFilterDateType] = useState('All'); 
+  const [selectedDateFilter, setSelectedDateFilter] = useState(null); // 從日曆選中的特定日期
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
@@ -127,6 +139,7 @@ export default function EscapeRoomApp() {
   const [showSponsorModal, setShowSponsorModal] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
   const [managingEvent, setManagingEvent] = useState(null);
+  const [isViewOnlyMode, setIsViewOnlyMode] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [profileName, setProfileName] = useState("");
 
@@ -137,6 +150,13 @@ export default function EscapeRoomApp() {
     website: "", description: "", meetingTime: "15", duration: "120", minPlayers: 4,
     teammateNote: "", contactLineId: ""
   });
+
+  // --- WebView Check ---
+  useEffect(() => {
+    if (isWebView()) {
+      setInWebView(true);
+    }
+  }, []);
 
   // --- Auth 監聽 & User Data Sync ---
   useEffect(() => {
@@ -155,9 +175,9 @@ export default function EscapeRoomApp() {
               displayName: currentUser.displayName || "匿名玩家",
               email: currentUser.email,
               photoURL: currentUser.photoURL || "https://api.dicebear.com/7.x/ghost/svg?seed=" + currentUser.uid,
-              flakeCount: 0, 
-              isBanned: false
-            };
+      flakeCount: 0, 
+      isBanned: false 
+    };
             await setDoc(userRef, userData, { merge: true });
           } else {
               // 更新登入時間或同步 Google 資料
@@ -299,8 +319,12 @@ export default function EscapeRoomApp() {
       );
     }
 
-    // 4. 快速標籤
-    if (filterDateType === 'Today') {
+    // 4. 特定日期篩選（從日曆選中）
+    if (selectedDateFilter) {
+      filtered = filtered.filter(ev => ev.date === selectedDateFilter);
+    }
+    // 5. 快速標籤（只有在沒有特定日期篩選時才生效）
+    else if (filterDateType === 'Today') {
       filtered = filtered.filter(ev => ev.date === todayStr);
     } else if (filterDateType === 'Tomorrow') {
       const tmr = new Date();
@@ -441,7 +465,7 @@ export default function EscapeRoomApp() {
         fetchData();
     }, [managingEvent]);
 
-    if (!managingEvent) return null;
+    const isHost = user && managingEvent && user.uid === managingEvent.hostUid && !isViewOnlyMode;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -452,11 +476,16 @@ export default function EscapeRoomApp() {
                     <X size={18} />
                 </button>
 
-                <h3 className="text-xl font-bold text-white mb-1">管理團員</h3>
-                <p className="text-slate-400 text-xs mb-4">可以移除成員或回報跳車。</p>
+                <h3 className="text-xl font-bold text-white mb-1">{isHost ? '管理團員' : '已參加成員'}</h3>
+                <p className="text-slate-400 text-xs mb-4">{isHost ? '可以移除成員或回報跳車。' : '查看目前參與的夥伴。'}</p>
 
-                {/* 顯示正在進行的檢舉狀態 */}
-                {managingEvent.pendingFlake && (
+                {/* 顯示正在進行的檢舉狀態 - 只有在非 ViewOnly 模式下或 ViewOnly 模式下隱藏（題目說：不要其他的，包含跳車檢舉進行中等等，意即檢視模式下要隱藏） */}
+                {/* 使用者需求：View Participants 無論是否主揪，都只顯示成員，不要其他的(含跳車檢舉)。 */}
+                {/* 因此 isViewOnlyMode 為 true 時，這些都應該隱藏。上面已經把 isHost 綁定 !isViewOnlyMode，所以依賴 isHost 判斷即可，或額外判斷。 */}
+                {/* 但 pendingFlake 顯示原本是針對所有人可見的提示，現在需求是 "查看已參加成員...不要其他的...包含跳車檢舉" */}
+                {/* 所以當 isViewOnlyMode 為 true 時，這個區塊應該隱藏。 */}
+                
+                {managingEvent.pendingFlake && !isViewOnlyMode && (
                     <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
                         <div className="flex items-start gap-2">
                             <AlertTriangle size={16} className="text-yellow-500 mt-0.5 shrink-0" />
@@ -485,7 +514,7 @@ export default function EscapeRoomApp() {
                                     <div className="flex justify-between items-center">
                                         <div className="flex items-center gap-2">
                                             <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center overflow-hidden">
-                                                <img src={p.photoURL} alt="" className="w-full h-full object-cover"/>
+                                                {p.photoURL ? <img src={p.photoURL} alt="" className="w-full h-full object-cover"/> : <User size={16} className="text-slate-400"/>}
                                             </div>
                                             <div>
                                                 <div className="text-sm font-bold text-slate-200">{p.displayName} {p.uid === managingEvent.hostUid && '(主揪)'}</div>
@@ -496,7 +525,7 @@ export default function EscapeRoomApp() {
                                                 )}
                                             </div>
                                         </div>
-                                        {p.uid !== managingEvent.hostUid && (
+                                        {isHost && p.uid !== managingEvent.hostUid && (
                                             <button 
                                                 onClick={() => handleKick(managingEvent, p.uid, 'participant')}
                                                 className="text-xs bg-slate-700 text-slate-400 px-3 py-1.5 rounded-lg hover:bg-slate-600 transition-colors"
@@ -507,7 +536,7 @@ export default function EscapeRoomApp() {
                                     </div>
                                     
                                     {/* 只有主揪可以看到檢舉按鈕，且不能檢舉自己，也不能重複檢舉 */}
-                                    {p.uid !== managingEvent.hostUid && !managingEvent.pendingFlake && (
+                                    {isHost && p.uid !== managingEvent.hostUid && !managingEvent.pendingFlake && (
                                         <button 
                                             onClick={() => handleReportFlake(managingEvent, p.uid, p.displayName)}
                                             className="w-full py-2 rounded-lg bg-red-500/10 text-red-400 text-xs font-bold border border-red-500/20 hover:bg-red-500/20 flex items-center justify-center gap-1"
@@ -533,7 +562,7 @@ export default function EscapeRoomApp() {
                                 <div key={p.uid} className="flex justify-between items-center bg-slate-800/50 p-2 rounded-xl border border-slate-700/50">
                                     <div className="flex items-center gap-2">
                                         <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center overflow-hidden">
-                                            <img src={p.photoURL} alt="" className="w-full h-full object-cover"/>
+                                            {p.photoURL ? <img src={p.photoURL} alt="" className="w-full h-full object-cover"/> : <User size={16} className="text-slate-400"/>}
                                         </div>
                                         <div>
                                             <div className="text-sm font-bold text-slate-200">{p.displayName}</div>
@@ -544,12 +573,14 @@ export default function EscapeRoomApp() {
                                             )}
                                         </div>
                                     </div>
-                                    <button 
-                                        onClick={() => handleKick(managingEvent, p.uid, 'waitlist')}
-                                        className="text-xs bg-slate-700 text-slate-400 px-2 py-1.5 rounded-lg hover:bg-slate-600 transition-colors"
-                                    >
-                                        移除
-                                    </button>
+                                    {isHost && (
+                                        <button 
+                                            onClick={() => handleKick(managingEvent, p.uid, 'waitlist')}
+                                            className="text-xs bg-slate-700 text-slate-400 px-2 py-1.5 rounded-lg hover:bg-slate-600 transition-colors"
+                                        >
+                                            移除
+                                        </button>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -695,7 +726,13 @@ export default function EscapeRoomApp() {
                                 <button 
                                     key={dateStr}
                                     disabled={isPast}
-                                    onClick={() => setSelectedDate(d)}
+                                    onClick={() => {
+                                        // 設定日期篩選並關閉日曆，回到主頁面
+                                        setSelectedDateFilter(dateStr);
+                                        setFilterDateType('All'); // 清除快速標籤
+                                        setShowCalendar(false);
+                                        setActiveTab('lobby');
+                                    }}
                                     className={`aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all
                                         ${isPast 
                                             ? 'bg-slate-800/20 text-slate-700 cursor-not-allowed' 
@@ -778,6 +815,32 @@ export default function EscapeRoomApp() {
   const handleNavigation = (location) => {
     const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`;
     window.open(url, '_blank');
+  };
+
+  const handleShowParticipants = async (ev) => {
+    if (!ev.participants || ev.participants.length === 0) {
+      showToast("目前還沒有參加者", "error");
+      return;
+    }
+
+    try {
+      // 獲取所有參加者的資料
+      const participantPromises = ev.participants.map(uid => getDoc(doc(db, "users", uid)));
+      const participantSnaps = await Promise.all(participantPromises);
+      const participantNames = participantSnaps
+        .filter(snap => snap.exists())
+        .map(snap => {
+          const data = snap.data();
+          return data.displayName || '未知使用者';
+        });
+
+      // 顯示參加者名單（使用較長的顯示時間，因為名單可能較長）
+      const namesList = participantNames.join('、');
+      showToast(`參加者：${namesList}`, "success", 5000);
+    } catch (error) {
+      console.error("Error fetching participants:", error);
+      showToast("無法載入參加者名單", "error");
+    }
   };
 
   const handleEdit = (ev) => {
@@ -1008,15 +1071,16 @@ export default function EscapeRoomApp() {
       setFilterStudio('All');
       setFilterMonth('All');
       setFilterDateType('All');
+      setSelectedDateFilter(null);
     } catch (error) {
       console.error("Error adding/updating document: ", error);
       showToast("操作失敗: " + error.message, "error");
     }
   };
 
-  const showToast = (msg, type = "success") => {
+  const showToast = (msg, type = "success", duration = 3000) => {
     setNotification({ show: true, msg, type });
-    setTimeout(() => setNotification({ ...notification, show: false }), 3000);
+    setTimeout(() => setNotification({ ...notification, show: false }), duration);
   };
 
   const BottomNav = () => (
@@ -1056,6 +1120,29 @@ export default function EscapeRoomApp() {
       </div>
     </div>
   );
+
+  if (inWebView) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center p-8 text-center">
+        <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-2xl max-w-md w-full">
+          <div className="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <AlertTriangle size={32} className="text-yellow-500" />
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-4">請使用瀏覽器開啟</h1>
+          <p className="text-slate-400 mb-6 leading-relaxed">
+            Google 安全政策限制在 App 內嵌瀏覽器（如 LINE, Facebook）中進行登入。
+          </p>
+          <div className="bg-slate-800/50 rounded-xl p-4 text-sm text-slate-300 text-left mb-6">
+            <p className="font-medium text-white mb-2">操作步驟：</p>
+            <ol className="list-decimal list-inside space-y-1">
+              <li>點擊右上角的選單圖示 <span className="inline-block bg-slate-700 px-1.5 rounded">...</span></li>
+              <li>選擇「在瀏覽器開啟」或「Open in Chrome/Safari」</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) {
     return (
@@ -1176,7 +1263,10 @@ export default function EscapeRoomApp() {
               {['All', 'Today', 'Tomorrow', 'Weekend'].map((type) => (
                 <button 
                   key={type} 
-                  onClick={() => setFilterDateType(type)}
+                  onClick={() => {
+                    setFilterDateType(type);
+                    setSelectedDateFilter(null); // 清除特定日期篩選
+                  }}
                       className={`flex-1 min-w-[70px] px-3 py-2.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors text-center
                     ${filterDateType === type 
                           ? 'bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/20' 
@@ -1331,9 +1421,21 @@ export default function EscapeRoomApp() {
                       </div>
                     </div>
 
-                    <button 
-                      disabled={isJoined || isWaitlisted}
-                      onClick={() => promptJoin(ev.id)}
+                      <button 
+                        onClick={() => {
+                            setManagingEvent(ev);
+                            setIsViewOnlyMode(true);
+                            setShowManageModal(true);
+                        }}
+                        className="w-full py-2.5 mb-3 bg-slate-800 text-slate-300 rounded-xl text-sm font-bold hover:bg-slate-700 hover:text-white transition-all border border-slate-700 flex items-center justify-center gap-2"
+                      >
+                          <Users size={16} className="text-emerald-400" />
+                          查看已參加成員
+                      </button>
+
+                      <button 
+                        disabled={isJoined || isWaitlisted}
+                        onClick={() => promptJoin(ev.id)}
                       className={`w-full py-2.5 rounded-xl font-medium text-sm transition-all active:scale-95 flex items-center justify-center
                         ${isJoined 
                           ? 'bg-slate-800 text-emerald-400 border border-emerald-500/20 cursor-not-allowed' 
@@ -1698,15 +1800,16 @@ export default function EscapeRoomApp() {
                           <div className="flex flex-col gap-2">
                              <div className="flex gap-2 justify-end">
                                 <button onClick={() => handleEdit(ev)} className="p-2 bg-slate-800 rounded-xl text-slate-400 hover:text-emerald-400 border border-slate-700 transition-colors">
-                                  <Edit size={16} />
-                                </button>
+                              <Edit size={16} />
+                            </button>
                                 <button onClick={() => handleDelete(ev.id)} className="p-2 bg-slate-800 rounded-xl text-slate-400 hover:text-red-400 border border-slate-700 transition-colors">
-                                  <Trash2 size={16} />
+                              <Trash2 size={16} />
                                 </button>
                              </div>
                              <button 
                                 onClick={() => {
                                     setManagingEvent(ev);
+                                    setIsViewOnlyMode(false);
                                     setShowManageModal(true);
                                 }}
                                 className="px-3 py-1.5 rounded-xl bg-indigo-500/10 text-indigo-400 font-bold text-xs border border-indigo-500/20 hover:bg-indigo-500/20 flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
@@ -1766,6 +1869,18 @@ export default function EscapeRoomApp() {
                            導航
                         </button>
                       </div>
+
+                      <button 
+                        onClick={() => {
+                            setManagingEvent(ev);
+                            setIsViewOnlyMode(true);
+                            setShowManageModal(true);
+                        }}
+                        className="w-full py-2.5 mb-3 bg-slate-800 text-slate-300 rounded-xl text-sm font-bold hover:bg-slate-700 hover:text-white transition-all border border-slate-700 flex items-center justify-center gap-2"
+                      >
+                          <Users size={16} className="text-emerald-400" />
+                          查看已參加成員
+                      </button>
 
                       <button 
                         onClick={() => promptCancel(ev.id)} 
