@@ -1815,7 +1815,7 @@ export default function EscapeRoomApp() {
                         className="w-full py-2.5 mb-3 bg-slate-800 text-slate-300 rounded-xl text-sm font-bold hover:bg-slate-700 hover:text-white transition-all border border-slate-700 flex items-center justify-center gap-2"
                       >
                           <Users size={16} className="text-emerald-400" />
-                          查看已參加成員
+                          查看已參加成員 
                       </button>
 
                     <div className="flex gap-2">
