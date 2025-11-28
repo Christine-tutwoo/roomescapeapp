@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "小迷糊密室逃脫揪團APP",
+  title: "小迷糊密室逃脫揪團平台",
   description: "最懂密室玩家的揪團神器",
 };
 

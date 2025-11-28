@@ -151,6 +151,8 @@ export default function EscapeRoomApp() {
   const [filterPrice, setFilterPrice] = useState('All'); // 新增費用篩選
   const [filterSlots, setFilterSlots] = useState('All'); // 新增缺額篩選
   const [filterEventId, setFilterEventId] = useState(null); // 用於分享連結的單一活動顯示
+  const [filterHostUid, setFilterHostUid] = useState(null);
+  const [filterHostName, setFilterHostName] = useState("");
   const [showCalendar, setShowCalendar] = useState(false);
   const [searchQuery, setSearchQuery] = useState(''); // 新增搜尋狀態
 
@@ -183,6 +185,8 @@ export default function EscapeRoomApp() {
   const [guestNames, setGuestNames] = useState([""]); // 攜伴姓名列表
   const [showGuestModal, setShowGuestModal] = useState(false); // 攜伴輸入框
   const [guestEventId, setGuestEventId] = useState(null); // 暫存要攜伴參加的活動 ID
+  const [guestSessionId, setGuestSessionId] = useState('main');
+  const [guestSessionOptions, setGuestSessionOptions] = useState([]);
   const maxEventDate = useMemo(() => {
     const limit = new Date();
     limit.setFullYear(limit.getFullYear() + 10);
@@ -203,8 +207,13 @@ export default function EscapeRoomApp() {
     if (typeof window !== 'undefined') {
         const urlParams = new URLSearchParams(window.location.search);
         const sharedEventId = urlParams.get('eventId');
+        const sharedHostUid = urlParams.get('host');
         if (sharedEventId) {
             setFilterEventId(sharedEventId);
+            setActiveTab('lobby');
+        }
+        if (sharedHostUid) {
+            setFilterHostUid(sharedHostUid);
             setActiveTab('lobby');
         }
     }
@@ -334,6 +343,26 @@ export default function EscapeRoomApp() {
     fetchWishes(); // 載入許願池
   }, []);
 
+  useEffect(() => {
+    if (!filterHostUid) {
+        setFilterHostName("");
+        return;
+    }
+    const hostEvent = events.find(ev => ev.hostUid === filterHostUid);
+    if (hostEvent) {
+        setFilterHostName(hostEvent.host || "");
+    }
+  }, [filterHostUid, events]);
+
+  useEffect(() => {
+    if (guestSessionOptions.length > 0) {
+        const matched = guestSessionOptions.find(opt => opt.id === guestSessionId);
+        if (!matched) {
+            setGuestSessionId(guestSessionOptions[0].id);
+        }
+    }
+  }, [guestSessionOptions, guestSessionId]);
+
   // --- Sync My Events / Waitlists ---
   useEffect(() => {
     if (user && events.length > 0) {
@@ -387,6 +416,25 @@ export default function EscapeRoomApp() {
     return ['All', ...Array.from(months).sort()];
   }, [events]);
 
+  const hostStats = useMemo(() => {
+    const stats = {};
+    events.forEach(ev => {
+        if (!ev.hostUid) return;
+        if (!stats[ev.hostUid]) {
+            stats[ev.hostUid] = {
+                name: ev.host || "主揪",
+                count: 0,
+                active: 0,
+                missing: 0
+            };
+        }
+        stats[ev.hostUid].count += 1;
+        if (!ev.isFull) stats[ev.hostUid].active += 1;
+        if (ev.totalSlots > ev.currentSlots) stats[ev.hostUid].missing += 1;
+    });
+    return stats;
+  }, [events]);
+
   const myWishes = useMemo(() => {
     if (!user) return [];
     return wishes.filter(w => w.wishedBy?.includes(user.uid));
@@ -404,6 +452,10 @@ export default function EscapeRoomApp() {
      if (filterEventId) {
          return filtered.filter(ev => ev.id === filterEventId);
      }
+
+    if (filterHostUid) {
+        filtered = filtered.filter(ev => ev.hostUid === filterHostUid);
+    }
 
      // 1. 基礎日期過濾：只顯示今天及未來的團
      filtered = filtered.filter(ev => {
@@ -639,6 +691,19 @@ export default function EscapeRoomApp() {
 
     const isHost = user && managingEvent && user.uid === managingEvent.hostUid && !isViewOnlyMode;
 
+    const getGuestSessionLabel = (guest) => {
+        if (!managingEvent || !guest?.sessionId || guest.sessionId === 'main') return '主場';
+        const sessions = managingEvent.chainSessions || [];
+        for (let i = 0; i < sessions.length; i++) {
+            const session = sessions[i];
+            const key = getChainSessionKey(session, i);
+            if (key === guest.sessionId || session.id === guest.sessionId) {
+                return `第 ${i + 2} 場：${session.title || '未命名主題'}`;
+            }
+        }
+        return '連刷場';
+    };
+
     const matchGuestRecord = (source, target) => {
         if (!source || !target) return false;
         if (source.id && target.id) return source.id === target.id;
@@ -674,7 +739,9 @@ export default function EscapeRoomApp() {
                 return;
             }
             const freedSlots = currentGuests.length - filteredGuests.length;
-            const newSlots = (liveEvent.currentSlots || managingEvent.currentSlots || 0) - freedSlots;
+            const removingFromChain = guest.sessionId && guest.sessionId !== 'main';
+            const baseSlots = liveEvent.currentSlots || managingEvent.currentSlots || 0;
+            const newSlots = removingFromChain ? baseSlots : baseSlots - freedSlots;
             const notice = guest.addedByUid ? {
                 id: generateRandomId(),
                 ownerUid: guest.addedByUid,
@@ -688,19 +755,47 @@ export default function EscapeRoomApp() {
 
             const updatePayload = {
                 guests: filteredGuests,
-                currentSlots: newSlots < 0 ? 0 : newSlots,
                 isFull: false
             };
+            if (!removingFromChain) {
+                updatePayload.currentSlots = newSlots < 0 ? 0 : newSlots;
+            }
+
+            if (removingFromChain) {
+                const updatedChainSessions = (liveEvent.chainSessions || managingEvent.chainSessions || []).map((session, index) => {
+                    const key = getChainSessionKey(session, index);
+                    if (key === guest.sessionId || session.id === guest.sessionId) {
+                        const sessionSlots = session.currentSlots ?? (session.participants?.length || 0);
+                        const adjustedSlots = Math.max(sessionSlots - freedSlots, 0);
+                        const totalSlots = session.totalSlots || liveEvent.totalSlots || 0;
+                        return {
+                            ...session,
+                            currentSlots: adjustedSlots,
+                            isFull: totalSlots ? adjustedSlots >= totalSlots : false
+                        };
+                    }
+                    return session;
+                });
+                updatePayload.chainSessions = updatedChainSessions;
+            }
+
             if (notice) {
                 updatePayload.guestRemovalNotices = arrayUnion(notice);
             }
 
             await updateDoc(eventRef, updatePayload);
             setGuestList(filteredGuests);
-            setManagingEvent(prev => prev && prev.id === managingEvent.id 
-                ? { ...prev, guests: filteredGuests, currentSlots: newSlots < 0 ? 0 : newSlots }
-                : prev
-            );
+            setManagingEvent(prev => {
+                if (!prev || prev.id !== managingEvent.id) return prev;
+                const updated = { ...prev, guests: filteredGuests };
+                if (!removingFromChain) {
+                    updated.currentSlots = newSlots < 0 ? 0 : newSlots;
+                }
+                if (removingFromChain && updatePayload.chainSessions) {
+                    updated.chainSessions = updatePayload.chainSessions;
+                }
+                return updated;
+            });
             fetchEvents(false);
             showToast("攜伴已移除", "success");
         } catch (error) {
@@ -806,6 +901,7 @@ export default function EscapeRoomApp() {
                                         <div>
                                             <div className="text-sm font-bold text-slate-200">{guest.name || `朋友 ${idx + 1}`}</div>
                                             <div className="text-xs text-slate-500">由 {guest.addedByName || '團員'} 代報</div>
+                                            <div className="text-[10px] text-slate-500 mt-1">場次：{getGuestSessionLabel(guest)}</div>
                                         </div>
                                         {isHost && (
                                             <button 
@@ -1224,6 +1320,29 @@ export default function EscapeRoomApp() {
     return [base, ...extras];
   };
 
+  const getJoinedSessionsForUser = (event, uid) => {
+    const options = [];
+    if (!event || !uid) return options;
+    if (event.participants?.includes(uid)) {
+        options.push({
+            id: 'main',
+            label: `主場：${event.title}`,
+            remaining: Math.max(event.totalSlots - event.currentSlots, 0)
+        });
+    }
+    (event.chainSessions || []).forEach((session, index) => {
+        const sessionId = getChainSessionKey(session, index);
+        if (session.participants?.includes(uid)) {
+            options.push({
+                id: sessionId,
+                label: `第 ${index + 2} 場：${session.title || '未命名主題'}`,
+                remaining: Math.max((session.totalSlots || event.totalSlots || 0) - (session.currentSlots ?? (session.participants?.length || 0)), 0)
+            });
+        }
+    });
+    return options;
+  };
+
   const promptJoin = (id) => {
     if (!user) { showToast("請先登入！", "error"); return; }
     if (user.flakeCount >= 3) { showToast("帳號受限。", "error"); return; }
@@ -1233,6 +1352,56 @@ export default function EscapeRoomApp() {
     // 如果是候補，不需要太嚴重的確認，但為了統一體驗也可以加
     // 這裡假設直接顯示確認視窗
     setConfirmModal({ show: true, eventId: id, action: 'join', title: targetEvent.title });
+  };
+
+  const handleViewHostProfile = (uid, name) => {
+    if (!uid) return;
+    setFilterHostUid(uid);
+    setFilterHostName(name || hostStats[uid]?.name || "");
+    setFilterEventId(null);
+    if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('host', uid);
+        url.searchParams.delete('eventId');
+        window.history.replaceState({}, '', url);
+    }
+    setActiveTab('lobby');
+  };
+
+  const clearHostFilter = () => {
+    setFilterHostUid(null);
+    setFilterHostName("");
+    if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('host');
+        window.history.replaceState({}, '', url);
+    }
+  };
+
+  const openGuestModalForEvent = (event) => {
+    if (!user) {
+        showToast("請先登入！", "error");
+        return;
+    }
+    if (!event) return;
+    const options = getJoinedSessionsForUser(event, user.uid);
+    if (options.length === 0) {
+        showToast("請先選擇要參加的場次，再使用攜伴功能", "error");
+        return;
+    }
+    setGuestSessionOptions(options);
+    setGuestSessionId(options[0].id);
+    setGuestEventId(event.id);
+    setGuestNames([""]);
+    setShowGuestModal(true);
+  };
+
+  const closeGuestModal = () => {
+    setShowGuestModal(false);
+    setGuestEventId(null);
+    setGuestSessionOptions([]);
+    setGuestSessionId('main');
+    setGuestNames([""]);
   };
 
   const handleJoin = async (id) => {
@@ -1261,49 +1430,77 @@ export default function EscapeRoomApp() {
         if (!targetEvent) return;
 
         const eventRef = doc(db, "events", guestEventId);
+        const sessionTargetId = guestSessionId || 'main';
         
-        // 檢查名額是否足夠
-        const alreadyJoined = targetEvent.participants?.includes(user.uid);
-        const totalNeeded = validGuests.length + (alreadyJoined ? 0 : 1);
-        if (targetEvent.currentSlots + totalNeeded > targetEvent.totalSlots) {
-             const remaining = Math.max(targetEvent.totalSlots - targetEvent.currentSlots - (alreadyJoined ? 0 : 1), 0);
-             showToast(remaining > 0 
-                ? `名額不足，只能再帶 ${remaining} 位朋友` 
-                : "名額不足，請先確認剩餘空位", "error");
-             return;
-        }
-
         // 準備要加入的 guests 陣列
         const newGuests = validGuests.map(name => ({
             id: generateRandomId(),
             addedByUid: user.uid,
             addedByName: user.displayName || "團員",
             name: name.trim(),
-            addedAt: Date.now()
+            addedAt: Date.now(),
+            sessionId: sessionTargetId
         }));
 
-        const newSlots = targetEvent.currentSlots + totalNeeded;
-        const updatePayload = {
-            currentSlots: newSlots,
-            isFull: newSlots >= targetEvent.totalSlots,
-            guests: arrayUnion(...newGuests) // 使用 spread operator 加入多個
-        };
-
-        if (!alreadyJoined) {
-            updatePayload.participants = arrayUnion(user.uid);
+        if (!targetEvent.isChainEvent || sessionTargetId === 'main') {
+            const alreadyJoined = targetEvent.participants?.includes(user.uid);
+            const totalNeeded = validGuests.length + (alreadyJoined ? 0 : 1);
+            if (targetEvent.currentSlots + totalNeeded > targetEvent.totalSlots) {
+                const remaining = Math.max(targetEvent.totalSlots - targetEvent.currentSlots - (alreadyJoined ? 0 : 1), 0);
+                showToast(remaining > 0 
+                    ? `名額不足，只能再帶 ${remaining} 位朋友` 
+                    : "名額不足，請先確認剩餘空位", "error");
+                return;
+            }
+            const newSlots = targetEvent.currentSlots + totalNeeded;
+            const updatePayload = {
+                currentSlots: newSlots,
+                isFull: newSlots >= targetEvent.totalSlots,
+                guests: arrayUnion(...newGuests)
+            };
+            if (!alreadyJoined) {
+                updatePayload.participants = arrayUnion(user.uid);
+            }
+            await updateDoc(eventRef, updatePayload);
+        } else {
+            const chainSessions = [...(targetEvent.chainSessions || [])];
+            let sessionIndex = -1;
+            let sessionData = null;
+            chainSessions.forEach((session, idx) => {
+                const key = getChainSessionKey(session, idx);
+                if (key === sessionTargetId || session.id === sessionTargetId) {
+                    sessionIndex = idx;
+                    sessionData = session;
+                }
+            });
+            if (sessionIndex === -1 || !sessionData) {
+                showToast("找不到連刷場次，請重新整理後再試", "error");
+                return;
+            }
+            const totalSlots = sessionData.totalSlots || targetEvent.totalSlots || 0;
+            const currentSlots = sessionData.currentSlots ?? (sessionData.participants?.length || 0);
+            const alreadyJoinedSession = sessionData.participants?.includes(user.uid);
+            const totalNeeded = validGuests.length + (alreadyJoinedSession ? 0 : 1);
+            if (totalSlots && currentSlots + totalNeeded > totalSlots) {
+                const remaining = Math.max(totalSlots - currentSlots, 0);
+                showToast(remaining > 0 ? `此場次僅能再帶 ${remaining} 位朋友` : "此連刷場次名額不足", "error");
+                return;
+            }
+            const updatedParticipants = alreadyJoinedSession ? sessionData.participants : [...(sessionData.participants || []), user.uid];
+            chainSessions[sessionIndex] = {
+                ...sessionData,
+                participants: updatedParticipants,
+                currentSlots: currentSlots + totalNeeded,
+                isFull: totalSlots ? currentSlots + totalNeeded >= totalSlots : sessionData.isFull
+            };
+            await updateDoc(eventRef, {
+                chainSessions,
+                guests: arrayUnion(...newGuests)
+            });
         }
         
-        await updateDoc(eventRef, updatePayload);
-        
-        showToast(
-            alreadyJoined 
-                ? `已幫 ${validGuests.join('、')} 報名成功！`
-                : `已替您與 ${validGuests.join('、')} 完成報名！`, 
-            "success"
-        );
-        setShowGuestModal(false);
-        setGuestNames([""]); // 重置為單一空字串
-        setGuestEventId(null);
+        showToast(`已幫 ${validGuests.join('、')} 報名成功！`, "success");
+        closeGuestModal();
         fetchEvents(false); // Refresh
     } catch (error) {
         console.error("Error adding guests:", error);
@@ -1502,15 +1699,29 @@ export default function EscapeRoomApp() {
   const addChainSession = () => {
     setFormData(prev => ({
         ...prev,
+        isChainEvent: true,
         chainSessions: [
-            ...prev.chainSessions,
+            ...(prev.chainSessions || []),
             {
                 id: generateRandomId(),
                 title: "",
+                category: prev.category,
+                region: prev.region,
                 type: prev.type,
+                website: prev.website,
+                description: prev.description,
+                teammateNote: prev.teammateNote,
+                contactLineId: prev.contactLineId,
+                meetingTime: prev.meetingTime,
+                duration: prev.duration,
+                minPlayers: prev.minPlayers,
+                studio: prev.studio,
+                location: prev.location,
                 date: "",
                 time: "",
-                price: prev.price
+                price: prev.price,
+                priceFull: prev.priceFull || prev.price,
+                totalSlots: prev.totalSlots
             }
         ]
     }));
@@ -1527,7 +1738,7 @@ export default function EscapeRoomApp() {
   const removeChainSession = (index) => {
     setFormData(prev => {
         const updated = prev.chainSessions.filter((_, idx) => idx !== index);
-        return { ...prev, chainSessions: updated };
+        return { ...prev, chainSessions: updated, isChainEvent: updated.length > 0 };
     });
   };
 
@@ -1635,6 +1846,7 @@ export default function EscapeRoomApp() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!user) return;
+    const hasChainSessions = (formData.chainSessions || []).length > 0;
     if (!isGoogleMapsLink(formData.location)) {
         showToast("完整地址請貼上 Google Maps 連結", "error");
         return;
@@ -1648,22 +1860,22 @@ export default function EscapeRoomApp() {
             showToast(`活動日期需在 ${maxEventDate} 之前`, "error");
             return;
         }
-        if (formData.isChainEvent) {
-            if (formData.chainSessions.length === 0) {
+        if (hasChainSessions) {
+            if ((formData.chainSessions || []).length === 0) {
                 showToast("請至少新增一場連刷場次", "error");
                 return;
             }
             const invalidSession = formData.chainSessions.some(session => 
-                !session.title?.trim() || !session.date || !session.time || !session.price
+                !session.title?.trim() || !session.date || !session.time || !session.price || !session.studio?.trim() || !session.location?.trim()
             );
             if (invalidSession) {
-                showToast("請完整填寫每一場連刷資料 (名稱 / 日期 / 時間 / 價格)", "error");
+                showToast("連刷場次資訊不完整（主題、日期、時間、價格、工作室、地址為必填）", "error");
                 return;
             }
         }
     }
 
-    const sanitizedChainSessions = formData.isChainEvent
+    const sanitizedChainSessions = hasChainSessions
         ? (formData.chainSessions || []).map(session => {
             const totalSlots = Number(session.totalSlots || formData.totalSlots || 6);
             const existingParticipants = Array.isArray(session.participants) ? session.participants : [];
@@ -1671,13 +1883,19 @@ export default function EscapeRoomApp() {
             const uniqueParticipants = Array.from(new Set(participants));
             const waitlist = Array.isArray(session.waitlist) ? session.waitlist : [];
             const currentSlots = Math.min(uniqueParticipants.length, totalSlots);
-            return {
+          return {
+                ...session,
                 id: session.id || generateRandomId(),
                 title: session.title?.trim() || "",
                 type: session.type || formData.type,
+                studio: session.studio?.trim() || formData.studio,
+                location: session.location?.trim() || formData.location,
+                category: session.category || formData.category,
+                region: session.region || formData.region,
                 date: session.date,
                 time: session.time,
                 price: session.price,
+                priceFull: session.priceFull || session.price,
                 totalSlots,
                 participants: uniqueParticipants,
                 waitlist,
@@ -1726,7 +1944,7 @@ export default function EscapeRoomApp() {
               priceFull: formData.priceFull || formData.price,
               isFull: isFull,
               chainSessions: sanitizedChainSessions,
-              isChainEvent: formData.isChainEvent
+              isChainEvent: hasChainSessions
             });
             
       showToast("活動更新成功！", "success");
@@ -1747,7 +1965,7 @@ export default function EscapeRoomApp() {
               waitlist: [],
               guests: [],
               guestRemovalNotices: [],
-              isChainEvent: formData.isChainEvent,
+              isChainEvent: hasChainSessions,
               chainSessions: sanitizedChainSessions,
               createdAt: new Date()
             });
@@ -2078,6 +2296,40 @@ export default function EscapeRoomApp() {
 
               {/* 活動列表 */}
               <div className="space-y-6">
+            {filterHostUid && (
+              <div className="bg-slate-900/60 border border-emerald-500/20 rounded-2xl p-5 mb-4 flex flex-col gap-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">正在檢視的主揪</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-bold text-white">{filterHostName || hostStats[filterHostUid]?.name || '主揪'}</span>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                        Lv.{Math.max(1, hostStats[filterHostUid]?.count || 1)}
+                      </span>
+                    </div>
+                  </div>
+                  <button onClick={clearHostFilter} className="text-xs text-slate-400 hover:text-white flex items-center gap-1">
+                    <ArrowLeft size={14} />
+                    返回所有活動
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="bg-slate-900 rounded-xl p-3 border border-slate-800">
+                    <p className="text-xs text-slate-500">歷史開團</p>
+                    <p className="text-lg font-bold text-white">{hostStats[filterHostUid]?.count || 0}</p>
+                  </div>
+                  <div className="bg-slate-900 rounded-xl p-3 border border-slate-800">
+                    <p className="text-xs text-slate-500">進行中</p>
+                    <p className="text-lg font-bold text-emerald-400">{hostStats[filterHostUid]?.active || 0}</p>
+                  </div>
+                  <div className="bg-slate-900 rounded-xl p-3 border border-slate-800">
+                    <p className="text-xs text-slate-500">缺人場次</p>
+                    <p className="text-lg font-bold text-yellow-300">{hostStats[filterHostUid]?.missing || 0}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {getFilteredEvents().length === 0 ? (
               <div className="text-center py-10 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800 border-dashed">
                 <Ghost size={40} className="mx-auto mb-2 opacity-20" />
@@ -2089,6 +2341,9 @@ export default function EscapeRoomApp() {
                 const isWaitlisted = myWaitlists.includes(ev.id);
                 const freeSlots = Math.max(ev.totalSlots - ev.currentSlots, 0);
                 const companionAvailable = freeSlots - (isJoined ? 0 : 1) > 0;
+                const locationLink = getMapsUrl(ev.location);
+                const joinedSessionOptions = ev.isChainEvent ? getJoinedSessionsForUser(ev, user?.uid) : [];
+                const chainGuestAvailable = joinedSessionOptions.some(opt => opt.remaining > 0);
                 const chainJoinedCount = (() => {
                   if (!ev.isChainEvent || !user) return 0;
                   let count = ev.participants?.includes(user.uid) ? 1 : 0;
@@ -2097,7 +2352,6 @@ export default function EscapeRoomApp() {
                   });
                   return count;
                 })();
-                const locationLink = getMapsUrl(ev.location);
                 const joinButtonDisabled = ev.isChainEvent ? false : (isJoined || isWaitlisted);
                 const joinButtonClass = ev.isChainEvent
                   ? 'bg-purple-500 text-slate-900 hover:bg-purple-400 shadow-lg shadow-purple-500/20 border border-purple-500/30'
@@ -2136,6 +2390,19 @@ export default function EscapeRoomApp() {
                         {/* 標題 (獨立一行) */}
                         <h3 className="text-xl font-bold text-white mb-2 leading-tight block">{ev.title}</h3>
                         
+                        <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
+                          <button 
+                            onClick={() => handleViewHostProfile(ev.hostUid, ev.host)}
+                            className="text-emerald-300 hover:text-emerald-200 font-semibold flex items-center gap-1"
+                          >
+                            {ev.host || '神秘主揪'}
+                            <Sparkles size={12} />
+                          </button>
+                          <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[10px] text-slate-300">
+                            Lv.{Math.max(1, hostStats[ev.hostUid]?.count || 1)}
+                          </span>
+                        </div>
+
                         <div className="text-sm font-bold text-slate-300 flex items-center mb-3">
                           <MapPin size={14} className="mr-1.5 shrink-0 text-slate-500" />
                           {locationLink ? (
@@ -2148,7 +2415,7 @@ export default function EscapeRoomApp() {
                               {ev.studio || '查看地圖'}
                             </a>
                           ) : (
-                            <span className="truncate">{ev.studio}</span>
+                          <span className="truncate">{ev.studio}</span>
                           )}
                         </div>
                         
@@ -2294,7 +2561,7 @@ export default function EscapeRoomApp() {
                       </div>
                     </div>
 
-                      <button 
+                    <button 
                         onClick={() => {
                             setManagingEvent(ev);
                             setIsViewOnlyMode(true);
@@ -2304,7 +2571,7 @@ export default function EscapeRoomApp() {
                       >
                           <Users size={16} className="text-emerald-400" />
                           查看已參加成員 
-                      </button>
+                    </button>
 
                     <div className="flex gap-2">
                     <button 
@@ -2335,21 +2602,28 @@ export default function EscapeRoomApp() {
                       )}
                     </button>
 
-                        {!ev.isChainEvent && !isWaitlisted && !ev.isFull && companionAvailable && (
+                        {((!ev.isChainEvent && !isWaitlisted && !ev.isFull && companionAvailable) || (ev.isChainEvent && chainGuestAvailable)) && (
                             <button 
                                 onClick={() => {
-                                    if (!user) {
-                                        showToast("請先登入！", "error");
-                                        return;
+                                    if (ev.isChainEvent) {
+                                        const eventData = events.find(evt => evt.id === ev.id);
+                                        openGuestModalForEvent(eventData || ev);
+                                    } else {
+                                        if (!user) {
+                                            showToast("請先登入！", "error");
+                                            return;
+                                        }
+                                        const availableForGuests = freeSlots - (isJoined ? 0 : 1);
+                                        if (availableForGuests <= 0) {
+                                            showToast(isJoined ? "目前沒有多餘名額可以幫朋友報名" : "需保留一個名額給自己，暫時無法攜伴", "error");
+                                            return;
+                                        }
+                                        setGuestNames([""]);
+                                        setGuestEventId(ev.id);
+                                        setGuestSessionId('main');
+                                        setGuestSessionOptions([{ id: 'main', label: ev.title, remaining: availableForGuests }]);
+                                        setShowGuestModal(true);
                                     }
-                                    const availableForGuests = freeSlots - (isJoined ? 0 : 1);
-                                    if (availableForGuests <= 0) {
-                                        showToast(isJoined ? "目前沒有多餘名額可以幫朋友報名" : "需保留一個名額給自己，暫時無法攜伴", "error");
-                                        return;
-                                    }
-                                    setGuestNames([""]);
-                                    setGuestEventId(ev.id);
-                                    setShowGuestModal(true);
                                 }}
                                 className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-sm border border-slate-700 hover:bg-slate-700 transition-all flex items-center justify-center"
                             >
@@ -2589,33 +2863,6 @@ export default function EscapeRoomApp() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              {createMode === 'event' && (
-                <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-bold text-white flex items-center gap-2">
-                        <Sparkles size={14} className="text-amber-400" />
-                        連刷團選項
-                      </p>
-                      <p className="text-xs text-slate-500">若勾選，請設定追加場次資訊，讓團員提前知道每一場的主題與時間。</p>
-                    </div>
-                    <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                      <span className="text-xs text-slate-400 font-medium">啟用</span>
-                      <input 
-                        type="checkbox" 
-                        checked={!!formData.isChainEvent} 
-                        onChange={(e) => setFormData(prev => ({ ...prev, isChainEvent: e.target.checked, chainSessions: e.target.checked ? (prev.chainSessions || []) : [] }))} 
-                        className="w-5 h-5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-                      />
-                    </label>
-                  </div>
-                  {formData.isChainEvent && (
-                    <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 px-3 py-2 rounded-xl">
-                      小提醒：第一團使用上方的主題與時間設定，下面只需輸入「第二團開始」的資料。
-                    </div>
-                  )}
-                </div>
-              )}
               
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -2725,79 +2972,6 @@ export default function EscapeRoomApp() {
                 </div>
               </div>
 
-              {createMode === 'event' && formData.isChainEvent && (
-                <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-bold text-white">追加連刷場次</h4>
-                      <p className="text-xs text-slate-500">從第二團開始依序填寫。可以為每一場設定不同主題、類型與價位。</p>
-                    </div>
-                    <button type="button" onClick={addChainSession} className="px-3 py-1.5 text-xs font-bold text-emerald-400 border border-emerald-500/30 rounded-lg hover:bg-emerald-500/10">
-                      + 新增下一團
-                    </button>
-                  </div>
-                  {(!formData.chainSessions || formData.chainSessions.length === 0) && (
-                    <div className="text-xs text-slate-500 border border-dashed border-slate-700 rounded-xl p-3">
-                      尚未建立其他場次，點擊「新增下一團」開始設定。
-                    </div>
-                  )}
-                  {(formData.chainSessions || []).map((session, index) => (
-                    <div key={session.id || index} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm font-bold text-white">第 {index + 2} 團</div>
-                        <button type="button" onClick={() => removeChainSession(index)} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1">
-                          <Trash2 size={12} /> 移除
-                        </button>
-                      </div>
-                      <div className="space-y-2">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-slate-400 font-medium">主題名稱 <span className="text-red-500">*</span></label>
-                            <input type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:border-emerald-500 outline-none text-sm"
-                              value={session.title}
-                              onChange={(e) => updateChainSession(index, 'title', e.target.value)}
-                              placeholder="第二場主題" />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-slate-400 font-medium">密室類型</label>
-                            <select className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:border-emerald-500 outline-none text-sm"
-                              value={session.type}
-                              onChange={(e) => updateChainSession(index, 'type', e.target.value)}>
-                              {['恐怖驚悚', '機關冒險', '劇情沉浸', '推理懸疑', '歡樂新手'].map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-3">
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-slate-400 font-medium">日期 <span className="text-red-500">*</span></label>
-                            <input type="date" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:border-emerald-500 outline-none text-center text-sm [color-scheme:dark]"
-                              min={formatDate(new Date())}
-                              max={maxEventDate}
-                              value={session.date}
-                              onChange={(e) => updateChainSession(index, 'date', e.target.value)} />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-slate-400 font-medium">時間 <span className="text-red-500">*</span></label>
-                            <input type="time" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:border-emerald-500 outline-none text-center text-sm [color-scheme:dark]"
-                              value={session.time}
-                              onChange={(e) => updateChainSession(index, 'time', e.target.value)} />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-slate-400 font-medium">價格 <span className="text-red-500">*</span></label>
-                            <div className="relative">
-                              <span className="absolute left-3 top-2 text-slate-500 text-sm">$</span>
-                              <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-7 pr-3 py-2 text-white focus:border-emerald-500 outline-none text-sm"
-                                min="0"
-                                value={session.price}
-                                onChange={(e) => updateChainSession(index, 'price', e.target.value)} />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -2894,6 +3068,195 @@ export default function EscapeRoomApp() {
                     </div>
                   </div>
                 </>
+              )}
+
+              {createMode === 'event' && (
+                <div className="space-y-4 pt-6 border-t border-slate-800/50 mt-8">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <Sparkles size={18} className="text-amber-400" />
+                      連刷場次
+                    </h3>
+                  </div>
+                  
+                  {(formData.chainSessions || []).map((session, index) => (
+                    <details key={session.id || index} className="group bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden" open>
+                      <summary className="flex items-center justify-between p-4 cursor-pointer bg-slate-900 select-none hover:bg-slate-800/50 transition-colors">
+                          <span className="font-bold text-white text-sm flex items-center gap-2">
+                            <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-xs border border-slate-700">第 {index + 2} 場</span>
+                            {session.title || '(未命名)'}
+                          </span>
+                          <div className="flex items-center gap-3">
+                             <button type="button" onClick={(e) => { e.preventDefault(); removeChainSession(index); }} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-500/10">
+                               <Trash2 size={12} /> 移除
+                             </button>
+                             <ChevronDown size={16} className="text-slate-500 transition-transform group-open:rotate-180" />
+                          </div>
+                      </summary>
+                      <div className="p-4 space-y-5 border-t border-slate-800">
+                         <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                                <label className="text-sm text-slate-400 font-medium">活動分類</label>
+                                <select className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none"
+                                  value={session.category} onChange={e => updateChainSession(index, 'category', e.target.value)}>
+                                  {['密室逃脫', '劇本殺', 'TRPG', '桌遊'].map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-sm text-slate-400 font-medium">所在地區</label>
+                                <select className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none"
+                                  value={session.region} onChange={e => updateChainSession(index, 'region', e.target.value)}>
+                                  {['北部', '中部', '南部', '東部', '離島'].map(r => <option key={r} value={r}>{r}</option>)}
+                                </select>
+                            </div>
+                         </div>
+
+                         <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                                <label className="text-sm text-slate-400 font-medium">主題名稱 <span className="text-red-500">*</span></label>
+                                <input type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                                  value={session.title} onChange={e => updateChainSession(index, 'title', e.target.value)} placeholder="例如: 籠中鳥" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-sm text-slate-400 font-medium">密室類型</label>
+                                <div className="relative">
+                                  <Tag size={18} className="absolute left-4 top-3.5 text-slate-500" />
+                                  <select className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none appearance-none"
+                                    value={session.type} onChange={e => updateChainSession(index, 'type', e.target.value)}>
+                                    {['恐怖驚悚', '機關冒險', '劇情沉浸', '推理懸疑', '歡樂新手'].map(t => <option key={t} value={t}>{t}</option>)}
+                                  </select>
+                                </div>
+                            </div>
+                         </div>
+
+                         <div className="space-y-1.5">
+                              <label className="text-sm text-slate-400 font-medium">官網連結 (選填)</label>
+                              <div className="relative">
+                                <Globe size={18} className="absolute left-4 top-3.5 text-slate-500" />
+                                <input type="url" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                                  value={session.website} onChange={e => updateChainSession(index, 'website', e.target.value)} placeholder="https://..." />
+                              </div>
+                          </div>
+
+                          <div className="space-y-1.5">
+                              <label className="text-sm text-slate-400 font-medium">活動簡介 (選填)</label>
+                              <textarea 
+                                maxLength={50}
+                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none h-20 resize-none" 
+                                value={session.description} 
+                                onChange={e => updateChainSession(index, 'description', e.target.value)} 
+                                placeholder="簡單介紹劇情..." 
+                              />
+                          </div>
+
+                           <div className="space-y-1.5">
+                              <label className="text-sm text-slate-400 font-medium">想找的隊友 (選填)</label>
+                              <input type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                                value={session.teammateNote} onChange={e => updateChainSession(index, 'teammateNote', e.target.value)} placeholder="例如：缺坦克..." />
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <label className="text-sm text-slate-400 font-medium">主揪社群名稱 (參加後才可見)</label>
+                              <input type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                                value={session.contactLineId} onChange={e => updateChainSession(index, 'contactLineId', e.target.value)} placeholder="方便大家聯繫你" />
+                            </div>
+
+                          <div className="grid grid-cols-3 gap-3">
+                                  <div className="space-y-1.5">
+                                    <label className="text-xs text-slate-400 font-medium">提前抵達(分)</label>
+                                    <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
+                                      value={session.meetingTime} onChange={e => updateChainSession(index, 'meetingTime', e.target.value)} placeholder="15" />
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <label className="text-xs text-slate-400 font-medium">遊戲總時長(分)</label>
+                                    <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
+                                      value={session.duration} onChange={e => updateChainSession(index, 'duration', e.target.value)} placeholder="120" />
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <label className="text-xs text-slate-400 font-medium">成團最低人數</label>
+                                    <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
+                                      value={session.minPlayers} onChange={e => updateChainSession(index, 'minPlayers', e.target.value)} placeholder="4" />
+                              </div>
+                          </div>
+
+                           <div className="space-y-1.5">
+                              <label className="text-sm text-slate-400 font-medium">工作室 <span className="text-red-500">*</span></label>
+                              <input required type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                                value={session.studio} onChange={e => updateChainSession(index, 'studio', e.target.value)} />
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <label className="text-sm text-slate-400 font-medium">完整地址 <span className="text-red-500">*</span></label>
+                              <div className="relative">
+                                <MapPin size={18} className="absolute left-4 top-3.5 text-slate-500" />
+                                <input required type="url" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                                  value={session.location} onChange={e => updateChainSession(index, 'location', e.target.value)} placeholder="請貼上 Google Maps 連結" />
+                              </div>
+                            </div>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-1.5">
+                                <label className="text-sm text-slate-400 font-medium">日期 <span className="text-red-500">*</span></label>
+                                <input required type="date" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none [color-scheme:dark]" 
+                                      min={formatDate(new Date())}
+                                      max={maxEventDate}
+                                  value={session.date} onChange={e => updateChainSession(index, 'date', e.target.value)} />
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className="text-sm text-slate-400 font-medium">時間 <span className="text-red-500">*</span></label>
+                                <input required type="time" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none [color-scheme:dark]" 
+                                  value={session.time} onChange={e => updateChainSession(index, 'time', e.target.value)} />
+                              </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1.5">
+                                  <label className="text-sm text-slate-400 font-medium">未滿團/基本價 <span className="text-red-500">*</span></label>
+                                  <div className="relative">
+                                    <span className="absolute left-4 top-3.5 text-slate-500">$</span>
+                                    <input required type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                                      value={session.price} onChange={e => updateChainSession(index, 'price', e.target.value)} placeholder="600" />
+                                  </div>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="text-sm text-slate-400 font-medium">滿團優惠價 (選填)</label>
+                                  <div className="relative">
+                                    <span className="absolute left-4 top-3.5 text-slate-500">$</span>
+                                    <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                                      value={session.priceFull} onChange={e => updateChainSession(index, 'priceFull', e.target.value)} placeholder="550" />
+                                  </div>
+                                </div>
+                          </div>
+
+                          <div className="space-y-1.5">
+                              <label className="text-sm text-slate-400 font-medium">總人數 <span className="text-red-500">*</span></label>
+                              <div className="relative">
+                                <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
+                                    <input 
+                                      type="number" 
+                                      required 
+                                      min="2" 
+                                      max="20"
+                                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
+                                      value={session.totalSlots} 
+                                      onChange={e => updateChainSession(index, 'totalSlots', e.target.value)}
+                                      placeholder="請輸入人數"
+                                    />
+                              </div>
+                          </div>
+                      </div>
+                    </details>
+                  ))}
+
+                  <button 
+                    type="button"
+                    onClick={addChainSession}
+                    className="w-full py-3 rounded-xl border border-dashed border-emerald-500/30 text-emerald-300 text-sm font-bold hover:bg-emerald-500/10 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Plus size={16} />
+                    新增連刷場次
+                  </button>
+                </div>
               )}
 
               <div className="pt-2">
@@ -3082,10 +3445,22 @@ export default function EscapeRoomApp() {
                             <span className="text-xs font-bold bg-amber-500/15 text-amber-300 px-2 py-1 rounded-lg border border-amber-500/30 flex items-center gap-1">
                               <Sparkles size={12} />
                               連刷 x{1 + (ev.chainSessions?.length || 0)}
-                            </span>
-                          )}
+                              </span>
+                            )}
                           </div>
                           <h3 className="text-xl font-bold text-white mb-1.5 leading-tight">{ev.title}</h3>
+                          <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
+                            <button 
+                              onClick={() => handleViewHostProfile(ev.hostUid, ev.host)}
+                              className="text-emerald-300 hover:text-emerald-200 font-semibold flex items-center gap-1"
+                            >
+                              {ev.host || '神秘主揪'}
+                              <Sparkles size={12} />
+                            </button>
+                            <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[10px] text-slate-300">
+                              Lv.{Math.max(1, hostStats[ev.hostUid]?.count || 1)}
+                            </span>
+                          </div>
                           <div className="text-sm font-medium text-slate-400 flex items-center">
                             <MapPin size={14} className="mr-1.5 text-slate-500" />
                             {locationLink ? (
@@ -3387,11 +3762,13 @@ export default function EscapeRoomApp() {
       {/* Guest Join Modal */}
       {showGuestModal && (() => {
         const targetEvent = events.find(e => e.id === guestEventId);
-        const alreadyJoinedInTarget = targetEvent?.participants?.includes(user?.uid);
-        const allowedGuestSlots = Math.max(
-            targetEvent ? targetEvent.totalSlots - targetEvent.currentSlots - (alreadyJoinedInTarget ? 0 : 1) : 0,
-            0
-        );
+        const options = guestSessionOptions.length > 0 ? guestSessionOptions : [{
+            id: 'main',
+            label: targetEvent ? `主場：${targetEvent.title}` : '主場',
+            remaining: targetEvent ? Math.max((targetEvent.totalSlots || 0) - (targetEvent.currentSlots || 0), 0) : 0
+        }];
+        const selectedSession = options.find(opt => opt.id === guestSessionId) || options[0];
+        const allowedGuestSlots = selectedSession ? selectedSession.remaining : 0;
         const filledGuests = guestNames.filter(n => n.trim()).length;
         const canAddMoreGuests = allowedGuestSlots > 0 && guestNames.length < allowedGuestSlots;
         const exceedsLimit = allowedGuestSlots > 0 && filledGuests > allowedGuestSlots;
@@ -3406,12 +3783,23 @@ export default function EscapeRoomApp() {
                     </h3>
                     <p className="text-slate-400 mb-2 text-sm">
                         幫朋友代報名，每位朋友都會佔用一個名額。
-                        {!alreadyJoinedInTarget && (
-                            <span className="text-yellow-400 ml-1">系統會自動替你佔一個名額。</span>
-                        )}
                     </p>
+                    {options.length > 1 && (
+                        <div className="mb-3">
+                            <label className="text-xs text-slate-500 mb-1 block">選擇場次</label>
+                            <select
+                                value={guestSessionId}
+                                onChange={(e) => setGuestSessionId(e.target.value)}
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                            >
+                                {options.map(opt => (
+                                    <option key={opt.id} value={opt.id}>{opt.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                     <div className="text-xs text-slate-500 mb-2">
-                        剩餘可代報 <span className="text-white font-bold">{allowedGuestSlots}</span> 位朋友
+                        {selectedSession?.label || '主場'} 剩餘可代報 <span className="text-white font-bold">{allowedGuestSlots}</span> 位朋友
                     </div>
                     {exceedsLimit && (
                         <div className="mb-2 text-xs text-yellow-400">
@@ -3476,7 +3864,7 @@ export default function EscapeRoomApp() {
                     )}
 
                     <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => setShowGuestModal(false)} className="py-2.5 rounded-xl text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors font-medium">取消</button>
+                        <button onClick={closeGuestModal} className="py-2.5 rounded-xl text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors font-medium">取消</button>
                         <button 
                             onClick={handleGuestJoin} 
                             disabled={confirmDisabled}
