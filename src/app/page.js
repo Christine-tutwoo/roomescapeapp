@@ -1522,24 +1522,6 @@ export default function EscapeRoomApp() {
 
                 {!filterEventId && (
                   <>
-                  {/* View Switcher (Lobby / Wishes) */}
-                  <div className="flex bg-slate-900 p-1 rounded-xl mb-4 border border-slate-800">
-                      <button 
-                          onClick={() => setActiveTab('lobby')}
-                          className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'lobby' ? 'bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/20' : 'text-slate-400 hover:text-white'}`}
-                      >
-                          <Search size={16} />
-                          尋找揪團
-                      </button>
-                      <button 
-                          onClick={() => setActiveTab('wishes')}
-                          className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'wishes' ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/20' : 'text-slate-400 hover:text-white'}`}
-                      >
-                          <Sparkles size={16} />
-                          許願池
-                      </button>
-                  </div>
-
                   <a 
                     href="https://linktr.ee/hu._escaperoom" 
                     target="_blank" 
