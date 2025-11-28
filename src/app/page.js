@@ -11,9 +11,9 @@ import {
   Plus, Users, MapPin, Calendar, Clock, DollarSign, Ghost, Search, 
   UserPlus, CheckCircle, CalendarPlus, Navigation, ExternalLink, 
   LogOut, AlertTriangle, Ban, X, Edit, Trash2, Filter, Tag, Info, 
-  MessageCircle, Hourglass, ChevronLeft, ChevronRight, Grid,
+  MessageCircle, Hourglass,   ChevronLeft, ChevronRight, Grid,
   Ticket, Gift, Timer, Globe, AlertCircle, Coffee, CalendarDays,
-  Download, Settings, User
+  Download, Settings, User, Sparkles, Heart, Share2, BellRing, ArrowLeft
 } from 'lucide-react';
 
     // 移除 INITIAL_EVENTS，因為現在使用 Firestore
@@ -114,6 +114,7 @@ export default function EscapeRoomApp() {
   const [user, setUser] = useState(null); 
   const [activeTab, setActiveTab] = useState('lobby'); 
   const [events, setEvents] = useState([]);
+  const [wishes, setWishes] = useState([]); // 新增許願池狀態
   const [lastVisible, setLastVisible] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -130,6 +131,9 @@ export default function EscapeRoomApp() {
   const [filterRegion, setFilterRegion] = useState('All');
   const [filterStudio, setFilterStudio] = useState('All');
   const [filterMonth, setFilterMonth] = useState('All'); 
+  const [filterPrice, setFilterPrice] = useState('All'); // 新增費用篩選
+  const [filterSlots, setFilterSlots] = useState('All'); // 新增缺額篩選
+  const [filterEventId, setFilterEventId] = useState(null); // 用於分享連結的單一活動顯示
   const [showCalendar, setShowCalendar] = useState(false);
   const [searchQuery, setSearchQuery] = useState(''); // 新增搜尋狀態
 
@@ -156,11 +160,25 @@ export default function EscapeRoomApp() {
     website: "", description: "", meetingTime: "15", duration: "120", minPlayers: 4,
     teammateNote: "", contactLineId: ""
   });
+  const [createMode, setCreateMode] = useState('event'); // 'event' or 'wish'
+  const [guestNames, setGuestNames] = useState([""]); // 攜伴姓名列表
+  const [showGuestModal, setShowGuestModal] = useState(false); // 攜伴輸入框
+  const [guestEventId, setGuestEventId] = useState(null); // 暫存要攜伴參加的活動 ID
 
-  // --- WebView Check ---
+  // --- WebView Check & URL Params Check ---
   useEffect(() => {
     if (isWebView()) {
       setInWebView(true);
+    }
+    
+    // Check for shared event ID in URL
+    if (typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const sharedEventId = urlParams.get('eventId');
+        if (sharedEventId) {
+            setFilterEventId(sharedEventId);
+            setActiveTab('lobby');
+        }
     }
   }, []);
 
@@ -270,9 +288,22 @@ export default function EscapeRoomApp() {
     }
   };
 
+  // --- 獲取許願池資料 ---
+  const fetchWishes = async () => {
+    try {
+      const q = query(collection(db, "wishes"), orderBy("createdAt", "desc"));
+      const querySnapshot = await getDocs(q);
+      const newWishes = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setWishes(newWishes);
+    } catch (error) {
+      console.error("Error fetching wishes:", error);
+    }
+  };
+
   // 初始載入
   useEffect(() => {
     fetchEvents(false);
+    fetchWishes(); // 載入許願池
   }, []);
 
   // --- Sync My Events / Waitlists ---
@@ -325,6 +356,11 @@ export default function EscapeRoomApp() {
     return ['All', ...Array.from(months).sort()];
   }, [events]);
 
+  const myWishes = useMemo(() => {
+    if (!user) return [];
+    return wishes.filter(w => w.wishedBy?.includes(user.uid));
+  }, [wishes, user]);
+
   const getFilteredEvents = () => {
     const now = new Date();
      // 設定時間為 00:00:00 以便只比較日期部分
@@ -333,6 +369,11 @@ export default function EscapeRoomApp() {
     
      let filtered = events;
  
+     // 0. 如果有指定 Event ID (分享連結)，只顯示該活動
+     if (filterEventId) {
+         return filtered.filter(ev => ev.id === filterEventId);
+     }
+
      // 1. 基礎日期過濾：只顯示今天及未來的團
      filtered = filtered.filter(ev => {
        const eventDate = new Date(ev.date);
@@ -355,6 +396,31 @@ export default function EscapeRoomApp() {
 
     if (filterMonth !== 'All') {
       filtered = filtered.filter(ev => ev.date.startsWith(filterMonth));
+    }
+
+    // 新增費用篩選
+    if (filterPrice !== 'All') {
+        filtered = filtered.filter(ev => {
+            const price = parseInt(ev.price);
+            if (isNaN(price)) return false;
+            if (filterPrice === 'under500') return price < 500;
+            if (filterPrice === '500-1000') return price >= 500 && price <= 1000;
+            if (filterPrice === 'above1000') return price > 1000;
+            return true;
+        });
+    }
+
+    // 新增缺額篩選
+    if (filterSlots !== 'All') {
+        filtered = filtered.filter(ev => {
+            const slotsLeft = ev.totalSlots - ev.currentSlots;
+            if (filterSlots === 'available') return slotsLeft > 0;
+            if (filterSlots === 'full') return slotsLeft <= 0;
+            if (filterSlots === '1') return slotsLeft === 1;
+            if (filterSlots === '2') return slotsLeft === 2;
+            if (filterSlots === '3+') return slotsLeft >= 3;
+            return true;
+        });
     }
 
     // 3. 搜尋過濾
@@ -387,6 +453,16 @@ export default function EscapeRoomApp() {
     }
 
     return filtered;
+  };
+
+  const handleShare = (eventId) => {
+    const url = `${window.location.origin}?eventId=${eventId}`;
+    navigator.clipboard.writeText(url).then(() => {
+        showToast("連結已複製！", "success");
+    }).catch(err => {
+        console.error('Failed to copy: ', err);
+        showToast("複製失敗", "error");
+    });
   };
 
   const handleUpdateProfile = async () => {
@@ -992,6 +1068,101 @@ export default function EscapeRoomApp() {
 
   const promptCancel = (id) => setConfirmModal({ show: true, eventId: id, action: 'cancel' });
 
+  const handleGuestJoin = async () => {
+    // 過濾出有效名字
+    const validGuests = guestNames.filter(name => name.trim() !== "");
+    
+    if (validGuests.length === 0) {
+        showToast("請至少輸入一位朋友的名字", "error");
+        return;
+    }
+    
+    try {
+        const targetEvent = events.find(e => e.id === guestEventId);
+        if (!targetEvent) return;
+
+        const eventRef = doc(db, "events", guestEventId);
+        
+        // 檢查名額是否足夠
+        if (targetEvent.currentSlots + validGuests.length > targetEvent.totalSlots) {
+             showToast(`名額不足，目前僅剩 ${targetEvent.totalSlots - targetEvent.currentSlots} 個空位`, "error");
+             return;
+        }
+
+        // 準備要加入的 guests 陣列
+        const newGuests = validGuests.map(name => ({
+            hostUid: user.uid,
+            name: name.trim(),
+            addedAt: new Date()
+        }));
+
+        const newSlots = targetEvent.currentSlots + newGuests.length;
+        
+        await updateDoc(eventRef, {
+            currentSlots: newSlots,
+            isFull: newSlots >= targetEvent.totalSlots,
+            guests: arrayUnion(...newGuests) // 使用 spread operator 加入多個
+        });
+        
+        showToast(`已幫 ${validGuests.join('、')} 報名成功！`, "success");
+        setShowGuestModal(false);
+        setGuestNames([""]); // 重置為單一空字串
+        setGuestEventId(null);
+        fetchEvents(false); // Refresh
+    } catch (error) {
+        console.error("Error adding guests:", error);
+        showToast("攜伴失敗: " + error.message, "error");
+    }
+  };
+
+  const handleJoinWish = async (wish) => {
+    if (!user) { showToast("請先登入！", "error"); return; }
+    
+    // Toggle: If already wished, cancel it
+    if (wish.wishedBy?.includes(user.uid)) {
+        handleCancelWish(wish.id);
+        return;
+    }
+
+    try {
+        const wishRef = doc(db, "wishes", wish.id);
+        await updateDoc(wishRef, {
+            wishedBy: arrayUnion(user.uid),
+            wishCount: (wish.wishCount || 0) + 1
+        });
+        showToast("集氣 +1 成功！", "success");
+        fetchWishes();
+    } catch (error) {
+        console.error("Error joining wish:", error);
+        showToast("操作失敗", "error");
+    }
+  };
+
+  const handleCancelWish = async (wishId) => {
+    if (!user) return;
+    const wish = wishes.find(w => w.id === wishId);
+    if (!wish) return;
+
+    if (!confirm(wish.hostUid === user.uid ? "確定要刪除這個許願嗎？" : "確定要取消許願嗎？")) return;
+
+    try {
+      if (wish.hostUid === user.uid) {
+        await deleteDoc(doc(db, "wishes", wishId));
+        showToast("許願已刪除", "success");
+      } else {
+        await updateDoc(doc(db, "wishes", wishId), {
+          wishedBy: arrayRemove(user.uid),
+          wishCount: (wish.wishCount || 1) - 1
+        });
+        showToast("已取消許願", "success");
+      }
+      fetchWishes(); 
+    } catch (error) {
+      console.error("Error cancelling wish:", error);
+      showToast("操作失敗", "error");
+    }
+  };
+
   const executeAction = async () => {
     const { eventId, action } = confirmModal;
     
@@ -1107,40 +1278,76 @@ export default function EscapeRoomApp() {
     if (!user) return;
 
     try {
-    if (isEditing) {
-        const eventRef = doc(db, "events", editingId);
-        // 取得目前的 event 以計算 isFull
-        const currentEvent = events.find(ev => ev.id === editingId);
-        const newTotalSlots = Number(formData.totalSlots);
-        const isFull = currentEvent ? currentEvent.currentSlots >= newTotalSlots : false;
-
-        await updateDoc(eventRef, {
-            ...formData,
-          totalSlots: newTotalSlots,
-          priceFull: formData.priceFull || formData.price,
-          isFull: isFull
-        });
-        
-      showToast("活動更新成功！", "success");
-      setIsEditing(false);
-      setEditingId(null);
-    } else {
-        await addDoc(collection(db, "events"), {
-        ...formData,
-          totalSlots: Number(formData.totalSlots),
-        priceFull: formData.priceFull || formData.price,
-        currentSlots: 1,
-        isFull: false,
-          endTime: "23:59", // 簡化處理
-        tags: [formData.type],
+      if (createMode === 'wish') {
+        // 許願模式
+        await addDoc(collection(db, "wishes"), {
+          title: formData.title,
+          studio: formData.studio,
+          region: formData.region,
+          category: formData.category,
+          type: formData.type,
+          website: formData.website || "",
+          location: formData.location, // 工作室地址
+          description: formData.description || "",
+          hostNote: formData.teammateNote || "",
+          contactLineId: formData.contactLineId || "",
           host: user.displayName,
           hostUid: user.uid,
-          participants: [user.uid],
-          waitlist: [],
-          createdAt: new Date()
+          createdAt: new Date(),
+          wishCount: 1, // 初始許願人數
+          targetCount: parseInt(formData.minPlayers) || 4,
+          wishedBy: [user.uid]
         });
-      showToast("開團成功！", "success");
-    }
+        showToast("許願成功！等待有緣人成團", "success");
+        fetchWishes(); // Refresh wishes
+        setActiveTab('wishes');
+      } else {
+        // 原有開團邏輯
+        if (isEditing) {
+            const eventRef = doc(db, "events", editingId);
+            // 取得目前的 event 以計算 isFull
+            const currentEvent = events.find(ev => ev.id === editingId);
+            const newTotalSlots = Number(formData.totalSlots);
+            const isFull = currentEvent ? currentEvent.currentSlots >= newTotalSlots : false;
+    
+            await updateDoc(eventRef, {
+                ...formData,
+              totalSlots: newTotalSlots,
+              priceFull: formData.priceFull || formData.price,
+              isFull: isFull
+            });
+            
+          showToast("活動更新成功！", "success");
+          setIsEditing(false);
+          setEditingId(null);
+        } else {
+            await addDoc(collection(db, "events"), {
+            ...formData,
+              totalSlots: Number(formData.totalSlots),
+            priceFull: formData.priceFull || formData.price,
+            currentSlots: 1,
+            isFull: false,
+              endTime: "23:59", // 簡化處理
+            tags: [formData.type],
+              host: user.displayName,
+              hostUid: user.uid,
+              participants: [user.uid],
+              waitlist: [],
+              createdAt: new Date()
+            });
+          showToast("開團成功！", "success");
+        }
+        setActiveTab('lobby');
+        // Reset Filters to ensure the new event is visible if it matches default logic
+        setFilterCategory('All');
+        setFilterRegion('All');
+        setFilterStudio('All');
+        setFilterMonth('All');
+        setFilterDateType('All');
+        setSelectedDateFilter(null);
+        // Refresh events to show the changes
+        fetchEvents(false);
+      }
     
       setFormData({ 
         title: "", studio: "", region: "北部", category: "密室逃脫", date: "", time: "", 
@@ -1148,16 +1355,6 @@ export default function EscapeRoomApp() {
         website: "", description: "", meetingTime: "15", duration: "120", minPlayers: 4,
         teammateNote: "", contactLineId: ""
       });
-    setActiveTab('lobby');
-      // Reset Filters to ensure the new event is visible if it matches default logic
-      setFilterCategory('All');
-      setFilterRegion('All');
-      setFilterStudio('All');
-      setFilterMonth('All');
-      setFilterDateType('All');
-      setSelectedDateFilter(null);
-      // Refresh events to show the changes
-      fetchEvents(false);
     } catch (error) {
       console.error("Error adding/updating document: ", error);
       showToast("操作失敗: " + error.message, "error");
@@ -1172,7 +1369,7 @@ export default function EscapeRoomApp() {
   const BottomNav = () => (
     <div className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 pb-safe z-40">
       <div className="flex justify-around items-center h-16 max-w-md mx-auto">
-        <button onClick={() => setActiveTab('lobby')} className={`flex flex-col items-center space-y-1 ${activeTab === 'lobby' ? 'text-emerald-400' : 'text-slate-500'}`}>
+        <button onClick={() => setActiveTab('lobby')} className={`flex flex-col items-center space-y-1 ${activeTab === 'lobby' || activeTab === 'wishes' ? 'text-emerald-400' : 'text-slate-500'}`}>
           <Search size={24} />
           <span className="text-xs">找團</span>
         </button>
@@ -1184,6 +1381,7 @@ export default function EscapeRoomApp() {
           onClick={() => {
             setActiveTab('create');
             setIsEditing(false);
+            setCreateMode('event'); // Default to event mode
           setFormData({ 
             title: "", studio: "", region: "北部", category: "密室逃脫", date: "", time: "", 
             price: "", priceFull: "", totalSlots: 6, location: "", type: "恐怖驚悚",
@@ -1201,7 +1399,7 @@ export default function EscapeRoomApp() {
         </button>
         <button onClick={() => setActiveTab('about')} className={`flex flex-col items-center space-y-1 ${activeTab === 'about' ? 'text-emerald-400' : 'text-slate-500'}`}>
           <Info size={24} />
-          <span className="text-xs">關於</span>
+          <span className="text-xs">資訊</span>
         </button>
       </div>
     </div>
@@ -1234,14 +1432,14 @@ export default function EscapeRoomApp() {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center font-sans">
         <div className="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center border-4 border-slate-800 mb-8 shadow-xl shadow-emerald-500/10">
-          <Ghost size={48} className="text-emerald-500" />
+          <Sparkles size={48} className="text-emerald-500" />
         </div>
         <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent mb-2">
-          小迷糊密室逃脫揪團APP
+          小迷糊密室逃脫揪團平台
         </h1>
-        <p className="text-slate-400 mb-8 max-w-xs">
-          最懂密室玩家的揪團神器。<br/>
-          主揪管理、自動防雷、行程同步。
+        <p className="text-slate-400 mb-8 max-w-xs leading-relaxed">
+          下一場冒險。從這裡出發。<br/>
+          找隊友、排行程，一次搞定。
         </p>
         <button onClick={handleLogin} className="w-full max-w-xs bg-white text-slate-900 font-bold py-3.5 rounded-xl flex items-center justify-center space-x-3 hover:bg-slate-100 transition-all active:scale-95">
           <span>使用 Google 帳號登入</span>
@@ -1264,7 +1462,7 @@ export default function EscapeRoomApp() {
        <header className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
         <div className="px-4 py-3 flex justify-between items-center">
           <h1 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent truncate max-w-[70%]">
-            小迷糊密室逃脫揪團APP
+            小迷糊密室逃脫揪團平台
           </h1>
           <div className="flex items-center gap-3">
             <button onClick={handleLogout} className="text-slate-400 hover:text-white"><LogOut size={18} /></button>
@@ -1274,38 +1472,103 @@ export default function EscapeRoomApp() {
 
       <main className="max-w-md mx-auto p-4">
         
-        {activeTab === 'lobby' && (
-          <div className="space-y-4 animate-in fade-in duration-300">
-            
-            <a 
-              href="https://linktr.ee/hu._escaperoom" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="block bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl p-4 text-white shadow-lg flex items-center justify-between group hover:brightness-110 transition-all relative overflow-hidden"
-            >
-              <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-2xl -mr-8 -mt-8"></div>
-              
-              <div className="flex items-center gap-3 relative z-10">
-                <div className="bg-white/20 p-2.5 rounded-full backdrop-blur-sm border border-white/20">
-                  <MessageCircle size={22} className="text-white" />
-                </div>
-                <div>
-                  <div className="font-bold text-sm md:text-base">加入小迷糊密室社群</div>
-                  <div className="text-xs text-purple-100 mt-0.5">找隊友、聊密室、看評論 👉</div>
-                </div>
-              </div>
-              <ExternalLink size={18} className="text-purple-200 group-hover:text-white transition-colors relative z-10" />
-            </a>
+        {/* Toggle View Mode (Lobby / Wishes) */}
+        {(activeTab === 'lobby' || activeTab === 'wishes') && (
+            <div className="flex bg-slate-900 p-1 rounded-xl mb-4 border border-slate-800">
+                <button 
+                    onClick={() => setActiveTab('lobby')}
+                    className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'lobby' ? 'bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/20' : 'text-slate-400 hover:text-white'}`}
+                >
+                    <Search size={16} />
+                    尋找揪團
+                </button>
+                <button 
+                    onClick={() => setActiveTab('wishes')}
+                    className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'wishes' ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/20' : 'text-slate-400 hover:text-white'}`}
+                >
+                    <Sparkles size={16} />
+                    許願池
+                </button>
+            </div>
+        )}
 
-            {/* 進階篩選器區塊 */}
-            <div className="space-y-4 bg-slate-900/50 p-4 rounded-3xl border border-slate-800">
+          {activeTab === 'lobby' && (
+            <div className="space-y-4 animate-in fade-in duration-300 pb-24">
+              {/* Filter Section */}
+              <div className="bg-slate-900 p-4 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-3xl -z-10"></div>
+                
+                {/* 如果是分享連結模式，顯示返回所有活動的按鈕 */}
+                {filterEventId && (
+                    <div className="mb-4 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between">
+                        <div className="flex items-center text-emerald-400 font-bold">
+                            <Sparkles size={20} className="mr-2 animate-pulse" />
+                            正在檢視分享的特定活動
+                        </div>
+                        <button 
+                            onClick={() => {
+                                setFilterEventId(null);
+                                // 清除 URL 中的 query param
+                                const url = new URL(window.location);
+                                url.searchParams.delete('eventId');
+                                window.history.pushState({}, '', url);
+                            }}
+                            className="bg-emerald-500 text-slate-900 px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-400 transition-colors"
+                        >
+                            查看所有活動
+                        </button>
+                    </div>
+                )}
+
+                {!filterEventId && (
+                  <>
+                  {/* View Switcher (Lobby / Wishes) */}
+                  <div className="flex bg-slate-900 p-1 rounded-xl mb-4 border border-slate-800">
+                      <button 
+                          onClick={() => setActiveTab('lobby')}
+                          className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'lobby' ? 'bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/20' : 'text-slate-400 hover:text-white'}`}
+                      >
+                          <Search size={16} />
+                          尋找揪團
+                      </button>
+                      <button 
+                          onClick={() => setActiveTab('wishes')}
+                          className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'wishes' ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/20' : 'text-slate-400 hover:text-white'}`}
+                      >
+                          <Sparkles size={16} />
+                          許願池
+                      </button>
+                  </div>
+
+                  <a 
+                    href="https://linktr.ee/hu._escaperoom" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="block bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl p-4 text-white shadow-lg flex items-center justify-between group hover:brightness-110 transition-all relative overflow-hidden mb-4"
+                  >
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-2xl -mr-8 -mt-8"></div>
+                    
+                    <div className="flex items-center gap-3 relative z-10">
+                      <div className="bg-white/20 p-2.5 rounded-full backdrop-blur-sm border border-white/20">
+                        <MessageCircle size={22} className="text-white" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-sm md:text-base">加入小迷糊密室社群</div>
+                        <div className="text-xs text-purple-100 mt-0.5">找隊友、聊密室、看評論 👉</div>
+                      </div>
+                    </div>
+                    <ExternalLink size={18} className="text-purple-200 group-hover:text-white transition-colors relative z-10" />
+                  </a>
+
+                  {/* 進階篩選器區塊 */}
+                  <div className="space-y-4 bg-slate-900/50 p-4 rounded-3xl border border-slate-800">
               
-              {/* 第一排：篩選選單 (改為 2x2 Grid) */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* 第一排：篩選選單 (改為 Grid，容納更多篩選器) */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                  <select 
                     value={filterCategory} 
                     onChange={(e) => setFilterCategory(e.target.value)}
-                    className="w-full bg-slate-800 text-white text-sm px-4 py-3 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 appearance-none"
+                    className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 appearance-none"
                  >
                    <option value="All">全部類型</option>
                    <option value="密室逃脫">密室逃脫</option>
@@ -1317,7 +1580,7 @@ export default function EscapeRoomApp() {
                  <select 
                     value={filterRegion} 
                     onChange={(e) => setFilterRegion(e.target.value)}
-                    className="w-full bg-slate-800 text-white text-sm px-4 py-3 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 appearance-none"
+                    className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 appearance-none"
                  >
                    <option value="All">全部地區</option>
                    <option value="北部">北部</option>
@@ -1326,11 +1589,11 @@ export default function EscapeRoomApp() {
                    <option value="東部">東部</option>
                    <option value="離島">離島</option>
                  </select>
-
+                 
                  <select 
                     value={filterStudio} 
                     onChange={(e) => setFilterStudio(e.target.value)}
-                    className="w-full bg-slate-800 text-white text-sm px-4 py-3 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 appearance-none"
+                    className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 appearance-none"
                  >
                    <option value="All">全部工作室</option>
                    {availableStudios.filter(s => s !== 'All').map(s => <option key={s} value={s}>{s}</option>)}
@@ -1339,10 +1602,34 @@ export default function EscapeRoomApp() {
                  <select 
                     value={filterMonth} 
                     onChange={(e) => setFilterMonth(e.target.value)}
-                    className="w-full bg-slate-800 text-white text-sm px-4 py-3 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 appearance-none"
+                    className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 appearance-none"
                  >
                    <option value="All">全部月份</option>
                    {availableMonths.filter(m => m !== 'All').map(m => <option key={m} value={m}>{m}月</option>)}
+                 </select>
+
+                 <select 
+                    value={filterPrice} 
+                    onChange={(e) => setFilterPrice(e.target.value)}
+                    className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 appearance-none"
+                 >
+                   <option value="All">全部費用</option>
+                   <option value="under500">$500以下</option>
+                   <option value="500-1000">$500 - $1000</option>
+                   <option value="above1000">$1000以上</option>
+                 </select>
+
+                 <select 
+                    value={filterSlots} 
+                    onChange={(e) => setFilterSlots(e.target.value)}
+                    className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 appearance-none"
+                 >
+                   <option value="All">所有狀態</option>
+                   <option value="available">尚有名額</option>
+                   <option value="full">已額滿</option>
+                   <option value="1">缺 1 人</option>
+                   <option value="2">缺 2 人</option>
+                   <option value="3+">缺 3 人以上</option>
                  </select>
               </div>
 
@@ -1381,12 +1668,19 @@ export default function EscapeRoomApp() {
                       placeholder="搜尋活動、工作室、介紹..." 
                       className="w-full bg-slate-800 text-white text-sm px-4 py-3 pl-10 rounded-xl border border-slate-700 outline-none focus:border-emerald-500 transition-all placeholder:text-slate-500"
                     />
-                    <Search size={16} className="absolute left-3.5 top-3.5 text-slate-400" />
-                  </div>
+                   <Search size={16} className="absolute left-3.5 top-3.5 text-slate-400" />
+                 </div>
               </div>
             </div>
+            </>
+            )}
+            {/* End of conditional rendering for filter section */}
+              </div>
+              {/* End of Filter Section div */}
 
-            {getFilteredEvents().length === 0 ? (
+              {/* 活動列表 */}
+              <div className="space-y-6">
+              {getFilteredEvents().length === 0 ? (
               <div className="text-center py-10 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800 border-dashed">
                 <Ghost size={40} className="mx-auto mb-2 opacity-20" />
                 <p>目前沒有符合的揪團<br/>快來當主揪開一團吧！</p>
@@ -1409,42 +1703,63 @@ export default function EscapeRoomApp() {
                       </div>
                     )}
 
-                    <div className="flex justify-between items-start mb-3 pr-16">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className="text-xs font-bold bg-emerald-500/10 text-emerald-500 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                    <div className="flex justify-between items-start mb-3 pr-12 relative">
+                      <div className="w-full">
+                        {/* 標籤列 (移到最上方) */}
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <span className="text-[10px] font-bold bg-emerald-500/10 text-emerald-500 px-2 py-1 rounded border border-emerald-500/20">
                             {ev.type}
                           </span>
-                          {/* 顯示類別 */}
-                          <span className="text-xs font-bold bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-500/20">
+                          <span className="text-[10px] font-bold bg-indigo-500/10 text-indigo-400 px-2 py-1 rounded border border-indigo-500/20">
                             {ev.category}
                           </span>
-                          <span className="text-xs font-bold bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20">
+                          <span className="text-[10px] font-bold bg-blue-500/10 text-blue-400 px-2 py-1 rounded border border-blue-500/20">
                             {ev.region}
                           </span>
-                          <h3 className="text-lg font-bold text-white truncate">{ev.title}</h3>
                         </div>
-                        <div className="text-base font-bold text-slate-300 flex items-center mt-1">
-                          <MapPin size={14} className="mr-1 shrink-0" />
+
+                        {/* 標題 (獨立一行) */}
+                        <h3 className="text-xl font-bold text-white mb-2 leading-tight block">{ev.title}</h3>
+                        
+                        <div className="text-sm font-bold text-slate-300 flex items-center mb-3">
+                          <MapPin size={14} className="mr-1.5 shrink-0 text-slate-500" />
                           <span className="truncate">{ev.studio}</span>
                         </div>
                         
                         {/* 簡介與網站 */}
                         {ev.description && (
-                          <p className="text-xs text-slate-500 mt-2 line-clamp-2">{ev.description}</p>
+                          <p className="text-xs text-slate-500 mb-3 line-clamp-2">{ev.description}</p>
                         )}
                         {ev.teammateNote && (
-                          <p className="text-xs text-emerald-400 mt-1 font-medium">徵求隊友：{ev.teammateNote}</p>
+                          <div className="bg-slate-800/50 p-2 rounded-lg mb-3 border border-slate-700/50">
+                              <div className="text-[10px] text-emerald-400 font-bold mb-1 flex items-center">
+                                  <MessageCircle size={10} className="mr-1"/> 主揪備註
+                              </div>
+                              <div className="text-xs text-slate-300">{ev.teammateNote}</div>
+                          </div>
                         )}
                         {ev.website && (
-                          <a href={ev.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-indigo-400 mt-1 hover:text-indigo-300">
-                            <Globe size={10} /> 官網介紹
+                          <a href={ev.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 mb-2">
+                            <Globe size={12} /> 官網介紹
                           </a>
                         )}
+                        
+                        {/* 分享按鈕 */}
+                        <div className="absolute top-0 right-0">
+                             <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleShare(ev.id);
+                                }}
+                                className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white border border-slate-700 transition-colors"
+                            >
+                                <Share2 size={16} />
+                            </button>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 text-sm text-slate-300 mb-4 bg-slate-950/30 p-3 rounded-xl">
+                    <div className="grid grid-cols-2 gap-2 text-sm text-slate-300 mb-4 bg-slate-950/30 p-3 rounded-xl border border-slate-800/50">
                       <div className="flex items-center">
                         <Calendar size={14} className="mr-2 text-slate-500" />
                         {ev.date}
@@ -1521,32 +1836,59 @@ export default function EscapeRoomApp() {
                           查看已參加成員
                       </button>
 
-                    <button 
-                      disabled={isJoined || isWaitlisted}
-                        onClick={() => promptJoin(ev.id)}
-                      className={`w-full py-2.5 rounded-xl font-medium text-sm transition-all active:scale-95 flex items-center justify-center
-                        ${isJoined 
-                          ? 'bg-slate-800 text-emerald-400 border border-emerald-500/20 cursor-not-allowed' 
-                          : isWaitlisted
-                            ? 'bg-slate-800 text-yellow-400 border border-yellow-500/20 cursor-not-allowed'
-                            : ev.isFull 
-                              ? 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 border border-yellow-500/20' 
-                              : 'bg-emerald-500 text-slate-900 hover:bg-emerald-400 shadow-lg shadow-emerald-500/20'}`}
-                    >
-                      {isJoined 
-                        ? <><CheckCircle size={16} className="mr-2"/> 已參加 (正取)</>
-                        : isWaitlisted 
-                          ? <><Hourglass size={16} className="mr-2"/> 已在候補名單</>
-                          : ev.isFull 
-                            ? '額滿，排候補' 
-                            : '我要 +1'}
-                    </button>
+                    <div className="flex gap-2">
+                        <button 
+                          disabled={isJoined || isWaitlisted}
+                            onClick={() => promptJoin(ev.id)}
+                          className={`flex-1 py-2.5 rounded-xl font-medium text-sm transition-all active:scale-95 flex items-center justify-center
+                            ${isJoined 
+                              ? 'bg-slate-800 text-emerald-400 border border-emerald-500/20 cursor-not-allowed' 
+                              : isWaitlisted
+                                ? 'bg-slate-800 text-yellow-400 border border-yellow-500/20 cursor-not-allowed'
+                                : ev.isFull 
+                                  ? 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 border border-yellow-500/20' 
+                                  : 'bg-emerald-500 text-slate-900 hover:bg-emerald-400 shadow-lg shadow-emerald-500/20'}`}
+                        >
+                          {isJoined 
+                            ? <><CheckCircle size={16} className="mr-2"/> 已參加 (正取)</>
+                            : isWaitlisted 
+                              ? <><Hourglass size={16} className="mr-2"/> 已在候補名單</>
+                              : ev.isFull 
+                                ? '額滿，排候補' 
+                                : <><UserPlus size={16} className="mr-2"/> 我要 +1</>}
+                        </button>
+
+                        {!isJoined && !isWaitlisted && !ev.isFull && (
+                            <button 
+                                onClick={() => {
+                                    setGuestEventId(ev.id);
+                                    setShowGuestModal(true);
+                                }}
+                                className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold text-sm border border-slate-700 hover:bg-slate-700 transition-all flex items-center justify-center"
+                            >
+                                <UserPlus size={18} className="mr-2" />
+                                攜伴
+                            </button>
+                        )}
+                    </div>
                   </div>
                 );
               })
             )}
-          </div>
-        )}
+              
+              {/* Load More Button */}
+              {hasMore && !filterEventId && (
+                <button 
+                  onClick={() => fetchEvents(true)}
+                  disabled={loadingMore}
+                  className="w-full py-3 rounded-xl bg-slate-800 text-slate-400 font-bold hover:bg-slate-700 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loadingMore ? '載入中...' : '載入更多活動'}
+                </button>
+              )}
+              </div>
+            </div>
+          )}
 
         {activeTab === 'promotions' && (
           <div className="space-y-6 animate-in fade-in duration-300">
@@ -1605,9 +1947,132 @@ export default function EscapeRoomApp() {
                 你是工作室老闆嗎？<br/>
                 想要在這裡曝光優惠資訊？
               </p>
-              <button className="mt-3 text-emerald-400 text-sm font-bold hover:underline">
-                聯繫我們刊登
-              </button>
+              <a 
+                href="https://www.instagram.com/hu._escaperoom/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 text-emerald-400 text-sm font-bold hover:underline inline-block"
+              >
+                聯繫我們刊登 (Instagram)
+              </a>
+              <div className="mt-2 text-xs text-slate-500">
+                或寄信至 xiaomihuu0921@gmail.com
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'wishes' && (
+          <div className="space-y-4 animate-in fade-in duration-300">
+            {/* Toggle View Mode (Lobby / Wishes) - Duplicated for Wishes view consistency */}
+            <div className="flex bg-slate-900 p-1 rounded-xl mb-4 border border-slate-800">
+                <button 
+                    onClick={() => setActiveTab('lobby')}
+                    className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'lobby' ? 'bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/20' : 'text-slate-400 hover:text-white'}`}
+                >
+                    <Search size={16} />
+                    尋找揪團
+                </button>
+                <button 
+                    onClick={() => setActiveTab('wishes')}
+                    className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'wishes' ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/20' : 'text-slate-400 hover:text-white'}`}
+                >
+                    <Sparkles size={16} />
+                    許願池
+                </button>
+            </div>
+
+            <div className="grid gap-4">
+              {wishes.length === 0 ? (
+                <div className="text-center py-10">
+                  <p className="text-slate-500 mb-4">目前還沒有人許願</p>
+                  <button onClick={() => { setActiveTab('create'); setCreateMode('wish'); }} className="px-4 py-2 bg-pink-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-pink-500/20 hover:bg-pink-400 transition-all">
+                    我來許第一個願！
+                  </button>
+                </div>
+              ) : (
+                wishes.map(wish => {
+                  const currentCount = wish.wishCount || 1;
+                  const targetCount = wish.targetCount || 4;
+                  const isFull = currentCount >= targetCount;
+                  const isWished = wish.wishedBy?.includes(user?.uid);
+
+                  return (
+                  <div key={wish.id} className="bg-slate-900 rounded-2xl p-4 border border-slate-800 shadow-lg relative overflow-hidden group hover:border-pink-500/30 transition-all">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-pink-500 to-purple-500" />
+                    
+                    <div className="flex flex-wrap gap-2 mb-2 pl-3 items-center">
+                        <span className="text-[10px] font-medium text-white px-2 py-1 bg-pink-500/20 rounded border border-pink-500/30">
+                            {wish.category}
+                        </span>
+                        <span className="text-[10px] font-medium text-slate-300 px-2 py-1 bg-slate-800 rounded border border-slate-700">
+                            {wish.region}
+                        </span>
+                        <span className="text-[10px] font-medium text-slate-300 px-2 py-1 bg-slate-800 rounded border border-slate-700">
+                            {wish.type}
+                        </span>
+                        {isFull && (
+                            <span className="ml-auto text-xs font-bold bg-yellow-500/10 text-yellow-400 px-2 py-1 rounded-lg border border-yellow-500/20 flex items-center animate-pulse">
+                                <BellRing size={12} className="mr-1"/> 人數已滿
+                            </span>
+                        )}
+                    </div>
+
+                    <h3 className="text-lg font-bold text-white mb-2 pl-3">{wish.title}</h3>
+                    
+                    <div className="pl-3 space-y-1 mb-4">
+                        <div className="text-sm font-medium text-slate-400 flex items-center">
+                            <MapPin size={14} className="mr-1.5 text-slate-500" />
+                            {wish.studio}
+                        </div>
+                        {wish.location && (
+                            <div className="text-xs text-slate-500 flex items-center">
+                                <Navigation size={12} className="mr-1.5" />
+                                {wish.location}
+                            </div>
+                        )}
+                    </div>
+
+                    {wish.description && (
+                        <p className="pl-3 text-xs text-slate-400 mb-4 line-clamp-2">
+                            {wish.description}
+                        </p>
+                    )}
+
+                    {/* Progress Bar */}
+                    <div className="pl-3 pr-1 mb-4">
+                        <div className="flex justify-between text-xs text-slate-500 mb-1">
+                            <span>集氣進度</span>
+                            <span className={isFull ? "text-yellow-400 font-bold" : "text-slate-400"}>
+                                {currentCount} / {targetCount} 人
+                            </span>
+                        </div>
+                        <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                            <div 
+                                className={`h-full rounded-full transition-all duration-500 ${isFull ? 'bg-yellow-400' : 'bg-pink-500'}`}
+                                style={{ width: `${Math.min((currentCount / targetCount) * 100, 100)}%` }}
+                            ></div>
+                        </div>
+                    </div>
+
+                    <div className="pl-3 flex items-center justify-between mt-2 pt-3 border-t border-slate-800/50">
+                        <div className="text-xs text-slate-500">
+                            發起人：{wish.host}
+                        </div>
+                        <button 
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all
+                                ${isWished 
+                                    ? 'bg-pink-500 text-white border-pink-500 hover:bg-pink-600' 
+                                    : 'bg-pink-500/10 text-pink-400 border-pink-500/20 hover:bg-pink-500/20'}`}
+                            onClick={() => handleJoinWish(wish)}
+                        >
+                            <Heart size={14} className={isWished ? "fill-current" : ""} />
+                            {isWished ? `已集氣 (${wish.wishCount || 0})` : `集氣 +1 (${wish.wishCount || 0})`}
+                        </button>
+                    </div>
+                  </div>
+                )})
+              )}
             </div>
           </div>
         )}
@@ -1615,9 +2080,28 @@ export default function EscapeRoomApp() {
         {activeTab === 'create' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
             <h2 className="text-xl font-bold text-white mb-6 flex items-center">
-              {isEditing ? <Edit className="mr-2 text-emerald-400" /> : <Plus className="mr-2 text-emerald-400" />}
-              {isEditing ? '編輯揪團內容' : '建立新揪團'}
+              {createMode === 'wish' ? <Sparkles className="mr-2 text-pink-400" /> : (isEditing ? <Edit className="mr-2 text-emerald-400" /> : <Plus className="mr-2 text-emerald-400" />)}
+              {createMode === 'wish' ? '許願新活動' : (isEditing ? '編輯揪團內容' : '建立新揪團')}
             </h2>
+            
+            {/* 許願切換按鈕 */}
+            {!isEditing && (
+                <div className="flex bg-slate-900 p-1 rounded-xl mb-6">
+                    <button 
+                        onClick={() => setCreateMode('event')}
+                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${createMode === 'event' ? 'bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/20' : 'text-slate-400 hover:text-white'}`}
+                    >
+                        發起揪團
+                    </button>
+                    <button 
+                        onClick={() => setCreateMode('wish')}
+                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${createMode === 'wish' ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/20' : 'text-slate-400 hover:text-white'}`}
+                    >
+                        許願池
+                    </button>
+                </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-5">
               
               <div className="grid grid-cols-2 gap-4">
@@ -1678,30 +2162,33 @@ export default function EscapeRoomApp() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-sm text-slate-400 font-medium">主揪 LINE ID (參加後才可見)</label>
+                <label className="text-sm text-slate-400 font-medium">{createMode === 'wish' ? '主辦 LINE ID' : '主揪 LINE ID'} (參加後才可見)</label>
                 <input type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
                   value={formData.contactLineId} onChange={e => setFormData({...formData, contactLineId: e.target.value})} placeholder="方便大家聯繫你" />
               </div>
 
-              {/* 時間與人數細節 */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs text-slate-400 font-medium">提前抵達(分)</label>
-                  <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
-                    value={formData.meetingTime} onChange={e => setFormData({...formData, meetingTime: e.target.value})} placeholder="15" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-slate-400 font-medium">遊戲總時長(分)</label>
-                  <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
-                    value={formData.duration} onChange={e => setFormData({...formData, duration: e.target.value})} placeholder="120" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-slate-400 font-medium">成團最低人數</label>
-                  <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
-                    value={formData.minPlayers} onChange={e => setFormData({...formData, minPlayers: e.target.value})} placeholder="4" />
-                </div>
-              </div>
-
+              {/* 許願模式隱藏以下欄位 */}
+              {createMode === 'event' && (
+                <>
+                  {/* 時間與人數細節 */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-slate-400 font-medium">提前抵達(分)</label>
+                      <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
+                        value={formData.meetingTime} onChange={e => setFormData({...formData, meetingTime: e.target.value})} placeholder="15" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-slate-400 font-medium">遊戲總時長(分)</label>
+                      <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
+                        value={formData.duration} onChange={e => setFormData({...formData, duration: e.target.value})} placeholder="120" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-slate-400 font-medium">成團最低人數</label>
+                      <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
+                        value={formData.minPlayers} onChange={e => setFormData({...formData, minPlayers: e.target.value})} placeholder="4" />
+                    </div>
+                  </div>
+                
               <div className="space-y-1.5">
                 <label className="text-sm text-slate-400 font-medium">工作室 <span className="text-red-500">*</span></label>
                 <input required type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
@@ -1717,66 +2204,105 @@ export default function EscapeRoomApp() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-sm text-slate-400 font-medium">日期 <span className="text-red-500">*</span></label>
-                  <input required type="date" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none [color-scheme:dark]" 
-                    min={formatDate(new Date())}
-                    value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm text-slate-400 font-medium">時間 <span className="text-red-500">*</span></label>
-                  <input required type="time" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none [color-scheme:dark]" 
-                    value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} />
-                </div>
-              </div>
-
-              <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 border-dashed space-y-4">
-                <div className="text-sm font-bold text-emerald-400 flex items-center">
-                  <DollarSign size={14} className="mr-1" />
-                  每人費用設定 (請備現金)
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-sm text-slate-400 font-medium">未滿團/基本價 <span className="text-red-500">*</span></label>
-                    <div className="relative">
-                      <span className="absolute left-4 top-3.5 text-slate-500">$</span>
-                      <input required type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                        value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} placeholder="600" />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-sm text-slate-400 font-medium">日期 <span className="text-red-500">*</span></label>
+                      <input required type="date" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none [color-scheme:dark]" 
+                        min={formatDate(new Date())}
+                        value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm text-slate-400 font-medium">時間 <span className="text-red-500">*</span></label>
+                      <input required type="time" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none [color-scheme:dark]" 
+                        value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} />
                     </div>
                   </div>
+
+                  <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 border-dashed space-y-4">
+                    <div className="text-sm font-bold text-emerald-400 flex items-center">
+                      <DollarSign size={14} className="mr-1" />
+                      每人費用設定 (請備現金)
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-sm text-slate-400 font-medium">未滿團/基本價 <span className="text-red-500">*</span></label>
+                        <div className="relative">
+                          <span className="absolute left-4 top-3.5 text-slate-500">$</span>
+                          <input required type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                            value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} placeholder="600" />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm text-slate-400 font-medium">滿團優惠價 (選填)</label>
+                        <div className="relative">
+                          <span className="absolute left-4 top-3.5 text-slate-500">$</span>
+                          <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                            value={formData.priceFull} onChange={e => setFormData({...formData, priceFull: e.target.value})} placeholder="550" />
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-500">若有設定滿團價，大廳會顯示「(滿團 $550)」供玩家參考。</p>
+                  </div>
+
                   <div className="space-y-1.5">
-                    <label className="text-sm text-slate-400 font-medium">滿團優惠價 (選填)</label>
+                    <label className="text-sm text-slate-400 font-medium">總人數 <span className="text-red-500">*</span></label>
                     <div className="relative">
-                      <span className="absolute left-4 top-3.5 text-slate-500">$</span>
-                      <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                        value={formData.priceFull} onChange={e => setFormData({...formData, priceFull: e.target.value})} placeholder="550" />
+                      <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
+                      <input 
+                        type="number" 
+                        required 
+                        min="2" 
+                        max="20"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
+                        value={formData.totalSlots} 
+                        onChange={e => setFormData({...formData, totalSlots: e.target.value})}
+                        placeholder="請輸入人數"
+                      />
                     </div>
                   </div>
-                </div>
-                <p className="text-xs text-slate-500">若有設定滿團價，大廳會顯示「(滿團 $550)」供玩家參考。</p>
-              </div>
+                </>
+              )}
 
-              <div className="space-y-1.5">
-                <label className="text-sm text-slate-400 font-medium">總人數 <span className="text-red-500">*</span></label>
-                <div className="relative">
-                  <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
-                  <input 
-                    type="number" 
-                    required 
-                    min="2" 
-                    max="20"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
-                    value={formData.totalSlots} 
-                    onChange={e => setFormData({...formData, totalSlots: e.target.value})}
-                    placeholder="請輸入人數"
-                  />
-                </div>
-              </div>
+              {/* 許願模式：工作室與地址 */}
+              {createMode === 'wish' && (
+                <>
+                  <div className="space-y-1.5">
+                    <label className="text-sm text-slate-400 font-medium">工作室 <span className="text-red-500">*</span></label>
+                    <input required type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                      value={formData.studio} onChange={e => setFormData({...formData, studio: e.target.value})} />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-sm text-slate-400 font-medium">工作室地址 <span className="text-red-500">*</span></label>
+                    <div className="relative">
+                      <MapPin size={18} className="absolute left-4 top-3.5 text-slate-500" />
+                      <input required type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                        value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} placeholder="方便大家導航" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-sm text-slate-400 font-medium">期望成團人數</label>
+                    <div className="relative">
+                      <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
+                      <input 
+                        type="number" 
+                        required 
+                        min="2" 
+                        max="20"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
+                        value={formData.minPlayers} 
+                        onChange={e => setFormData({...formData, minPlayers: e.target.value})}
+                        placeholder="例如: 4"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="pt-2">
-                <button type="submit" disabled={user.flakeCount >= 3} className={`w-full font-bold text-lg py-4 rounded-xl shadow-lg active:scale-95 transition-all ${user.flakeCount >= 3 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-emerald-500 text-slate-900 shadow-emerald-500/20 hover:bg-emerald-400'}`}>
-                  {user.flakeCount >= 3 ? '帳號受限' : (isEditing ? '更新揪團資訊' : '發布揪團')}
+                <button type="submit" disabled={user.flakeCount >= 3} className={`w-full font-bold text-lg py-4 rounded-xl shadow-lg active:scale-95 transition-all ${user.flakeCount >= 3 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : createMode === 'wish' ? 'bg-pink-500 text-white shadow-pink-500/20 hover:bg-pink-400' : 'bg-emerald-500 text-slate-900 shadow-emerald-500/20 hover:bg-emerald-400'}`}>
+                  {user.flakeCount >= 3 ? '帳號受限無法操作' : (createMode === 'wish' ? '發布許願' : (isEditing ? '更新活動' : '發布揪團'))}
                 </button>
                 {isEditing && (
                   <button type="button" onClick={() => { setIsEditing(false); setActiveTab('lobby'); }} className="w-full text-slate-500 text-sm mt-4 hover:text-slate-300">
@@ -1790,33 +2316,33 @@ export default function EscapeRoomApp() {
 
         {activeTab === 'profile' && (
           <div className="space-y-6 animate-in fade-in duration-300">
-            <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 text-center relative overflow-hidden">
-               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-cyan-500" />
-                
-                {/* 編輯個人資料按鈕 (如果已經改過名字，就隱藏或變更行為，這裡選擇如果次數 >= 1 就顯示提示) */}
-                <button 
-                    onClick={() => {
-                        if (isEditingProfile) {
-                            setIsEditingProfile(false);
-                        } else {
-                            if (user.nameChangedCount >= 1) {
-                                showToast("您已經修改過一次暱稱，無法再次修改", "error");
-                                return;
-                            }
-                            setProfileName(user.displayName);
-                            setIsEditingProfile(true);
-                        }
-                    }}
-                    className={`absolute top-4 right-4 p-2 rounded-full transition-colors ${user.nameChangedCount >= 1 ? 'text-slate-600 cursor-not-allowed bg-slate-800/20' : 'text-slate-400 hover:text-white bg-slate-800/50'}`}
-                >
-                    {isEditingProfile ? <X size={18}/> : <Settings size={18} />}
-                </button>
+          <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 text-center relative overflow-hidden">
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-cyan-500" />
+              
+              {/* 編輯個人資料按鈕 (如果已經改過名字，就隱藏或變更行為，這裡選擇如果次數 >= 1 就顯示提示) */}
+              <button 
+                  onClick={() => {
+                      if (isEditingProfile) {
+                          setIsEditingProfile(false);
+                      } else {
+                          if (user.nameChangedCount >= 1) {
+                              showToast("您已經修改過一次暱稱，無法再次修改", "error");
+                              return;
+                          }
+                          setProfileName(user.displayName);
+                          setIsEditingProfile(true);
+                      }
+                  }}
+                  className={`absolute top-4 right-4 p-2 rounded-full transition-colors ${user.nameChangedCount >= 1 ? 'text-slate-600 cursor-not-allowed bg-slate-800/20' : 'text-slate-400 hover:text-white bg-slate-800/50'}`}
+              >
+                  {isEditingProfile ? <X size={18}/> : <Settings size={18} />}
+              </button>
 
-               <div className="flex items-center justify-center mb-4">
-                  <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center border-2 border-slate-700 relative overflow-hidden">
-                   <img src={user.photoURL} alt="Avatar" className="w-full h-full object-cover" />
-                 </div>
+             <div className="flex items-center justify-center mb-4">
+                <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center border-2 border-slate-700 relative overflow-hidden">
+                 {user.photoURL ? <img src={user.photoURL} alt="Avatar" className="w-full h-full object-cover" /> : <User size={40} className="text-slate-500"/>}
                </div>
+             </div>
 
                 {isEditingProfile ? (
                     <div className="animate-in fade-in duration-300 mb-4">
@@ -1844,6 +2370,73 @@ export default function EscapeRoomApp() {
                  <div className="w-px bg-slate-700"></div>
                  <div className="flex flex-col"><span className={`font-bold text-lg ${user.flakeCount>0?'text-red-400':'text-emerald-400'}`}>{user.flakeCount}</span><span className="text-xs">跳車</span></div>
                </div>
+            </div>
+
+            <div>
+              <h3 className="text-lg font-bold text-white px-1 mb-3">我的許願</h3>
+              {myWishes.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 bg-slate-900/50 rounded-3xl border border-slate-800 border-dashed mb-8">
+                  尚未許願，去許願池看看吧！
+                </div>
+              ) : (
+                myWishes.map(wish => {
+                  const currentCount = wish.wishCount || 1;
+                  const targetCount = wish.targetCount || 4;
+                  const isFull = currentCount >= targetCount;
+
+                  return (
+                    <div key={wish.id} className="bg-slate-900 rounded-3xl p-5 border border-slate-800 mb-6 shadow-xl relative overflow-hidden group">
+                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-pink-500 to-purple-500 opacity-70" />
+                       
+                       <div className="flex justify-between items-start mb-4">
+                        <div className="flex-1 mr-2">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <span className="text-xs font-bold bg-pink-500/10 text-pink-400 px-2.5 py-1 rounded-lg border border-pink-500/20 flex items-center">
+                                <Sparkles size={12} className="mr-1.5"/> 許願中
+                            </span>
+                            {isFull && (
+                                <span className="text-xs font-bold bg-yellow-500/10 text-yellow-400 px-2.5 py-1 rounded-lg border border-yellow-500/20 flex items-center animate-pulse">
+                                    <BellRing size={12} className="mr-1.5"/> 人數已滿，可開團！
+                                </span>
+                            )}
+                             <span className="text-xs font-medium text-slate-500 px-2 py-1 bg-slate-800 rounded-lg">
+                                {wish.region}
+                            </span>
+                          </div>
+                          <h3 className="text-xl font-bold text-white mb-1.5 leading-tight">{wish.title}</h3>
+                          <div className="text-sm font-medium text-slate-400 flex items-center">
+                            <MapPin size={14} className="mr-1.5 text-slate-500" />
+                            {wish.studio}
+                          </div>
+                        </div>
+                        <button 
+                            onClick={() => handleCancelWish(wish.id)}
+                            className="p-2 bg-slate-800 rounded-xl text-slate-400 hover:text-red-400 border border-slate-700 transition-colors shrink-0"
+                            title={wish.hostUid === user.uid ? "刪除許願" : "取消許願"}
+                        >
+                            {wish.hostUid === user.uid ? <Trash2 size={16} /> : <LogOut size={16} />}
+                        </button>
+                       </div>
+                       
+                       {/* Progress Bar */}
+                       <div className="mb-4">
+                            <div className="flex justify-between text-xs text-slate-400 mb-1">
+                                <span>集氣進度</span>
+                                <span className={isFull ? "text-yellow-400 font-bold" : "text-slate-400"}>
+                                    {currentCount} / {targetCount} 人
+                                </span>
+                            </div>
+                            <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                                <div 
+                                    className={`h-full rounded-full transition-all duration-500 ${isFull ? 'bg-yellow-400' : 'bg-pink-500'}`}
+                                    style={{ width: `${Math.min((currentCount / targetCount) * 100, 100)}%` }}
+                                ></div>
+                            </div>
+                       </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
 
             <div>
@@ -1883,22 +2476,33 @@ export default function EscapeRoomApp() {
                           </div>
                         </div>
                         
-                        {/* 非主揪且非被檢舉人可見：若有進行中的檢舉，在右上角顯示附議按鈕 */}
-                        {ev.hostUid !== user.uid && ev.pendingFlake && ev.pendingFlake.targetUid !== user.uid && (
-                            <div className="absolute top-4 right-4 z-20 animate-pulse">
+                        <div className="flex flex-col gap-2 absolute top-4 right-4 z-20">
+                            {/* 分享按鈕 */}
+                             <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleShare(ev.id);
+                                }}
+                                className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white border border-slate-700 transition-colors shadow-lg"
+                            >
+                                <Share2 size={16} />
+                            </button>
+
+                            {/* 非主揪且非被檢舉人可見：若有進行中的檢舉，在右上角顯示附議按鈕 */}
+                            {ev.hostUid !== user.uid && ev.pendingFlake && ev.pendingFlake.targetUid !== user.uid && (
                                 <button 
                                     onClick={() => handleConfirmFlake(ev)}
-                                    className="flex items-center gap-1.5 bg-red-500 text-white px-3 py-1.5 rounded-lg shadow-lg shadow-red-500/30 font-bold text-xs hover:bg-red-600 transition-colors border border-red-400"
+                                    className="flex items-center gap-1.5 bg-red-500 text-white px-3 py-1.5 rounded-lg shadow-lg shadow-red-500/30 font-bold text-xs hover:bg-red-600 transition-colors border border-red-400 animate-pulse"
                                 >
                                     <AlertTriangle size={14} className="fill-current" />
                                     跳車附議
                                 </button>
-                            </div>
-                        )}
+                            )}
+                        </div>
 
                         {/* 操作按鈕群組 (主揪) */}
                         {ev.hostUid === user.uid && (
-                          <div className="flex flex-col gap-2">
+                          <div className="flex flex-col gap-2 mt-8">
                              <div className="flex gap-2 justify-end">
                                 <button onClick={() => handleEdit(ev)} className="p-2 bg-slate-800 rounded-xl text-slate-400 hover:text-emerald-400 border border-slate-700 transition-colors">
                               <Edit size={16} />
@@ -1953,6 +2557,20 @@ export default function EscapeRoomApp() {
                           </button>
                         </div>
                       )}
+
+                      <div className="flex gap-3 mb-4">
+                         {/* 新增分享按鈕 */}
+                         <button 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleShare(ev.id);
+                            }}
+                            className="flex-1 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-sm font-bold hover:bg-slate-700 hover:text-white transition-all border border-slate-700 flex items-center justify-center gap-2"
+                         >
+                             <Share2 size={16} className="text-purple-400" />
+                             分享
+                         </button>
+                      </div>
 
                       <div className="flex gap-3 mb-4">
                         <button 
@@ -2063,6 +2681,85 @@ export default function EscapeRoomApp() {
           </div>
         )}
       </main>
+
+      {/* Guest Join Modal */}
+      {showGuestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-slate-900 w-full max-w-sm rounded-2xl p-6 border border-slate-800 shadow-2xl">
+                <h3 className="text-xl font-bold text-white mb-2 flex items-center">
+                    <UserPlus className="text-emerald-500 mr-2" />
+                    攜伴參加
+                </h3>
+                <p className="text-slate-400 mb-4 text-sm">
+                    幫朋友代報名，每位朋友都會佔用一個名額。<br/>
+                    請輸入朋友的暱稱：
+                </p>
+                
+                <div className="space-y-3 mb-4 max-h-[40vh] overflow-y-auto custom-scrollbar pr-1">
+                    {guestNames.map((name, index) => (
+                        <div key={index} className="flex gap-2">
+                            <input 
+                                type="text" 
+                                autoFocus={index === guestNames.length - 1}
+                                value={name}
+                                onChange={(e) => {
+                                    const newNames = [...guestNames];
+                                    newNames[index] = e.target.value;
+                                    setGuestNames(newNames);
+                                }}
+                                className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-emerald-500"
+                                placeholder={`朋友 ${index + 1} 的名字`}
+                            />
+                            {guestNames.length > 1 && (
+                                <button 
+                                    onClick={() => {
+                                        const newNames = guestNames.filter((_, i) => i !== index);
+                                        setGuestNames(newNames);
+                                    }}
+                                    className="p-3 bg-slate-800 text-slate-400 hover:text-red-400 rounded-xl border border-slate-700 transition-colors"
+                                >
+                                    <Trash2 size={20} />
+                                </button>
+                            )}
+                        </div>
+                    ))}
+                </div>
+
+                {(() => {
+                    const targetEvent = events.find(e => e.id === guestEventId);
+                    const remainingSlots = targetEvent ? targetEvent.totalSlots - targetEvent.currentSlots : 0;
+                    const canAddMore = guestNames.length < remainingSlots;
+
+                    return (
+                        <button 
+                            disabled={!canAddMore}
+                            onClick={() => setGuestNames([...guestNames, ""])}
+                            className={`w-full py-3 mb-4 rounded-xl border border-dashed text-sm font-bold flex items-center justify-center gap-2 transition-all
+                                ${canAddMore 
+                                    ? 'border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800/50' 
+                                    : 'border-slate-800 text-slate-600 cursor-not-allowed bg-slate-900/50'}`}
+                        >
+                            {canAddMore ? (
+                                <>
+                                    <Plus size={16} />
+                                    增加一位朋友
+                                </>
+                            ) : (
+                                <span>已達本團人數上限</span>
+                            )}
+                        </button>
+                    );
+                })()}
+
+                <div className="grid grid-cols-2 gap-3">
+                    <button onClick={() => setShowGuestModal(false)} className="py-2.5 rounded-xl text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors font-medium">取消</button>
+                    <button onClick={handleGuestJoin} className="py-2.5 rounded-xl text-slate-900 bg-emerald-500 hover:bg-emerald-400 font-bold shadow-lg shadow-emerald-500/20 transition-all">
+                        確認代報名 ({guestNames.filter(n => n.trim()).length}人)
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
 
       {confirmModal.show && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-950/70 backdrop-blur-sm">
