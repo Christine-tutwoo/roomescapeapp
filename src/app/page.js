@@ -1710,7 +1710,9 @@ export default function EscapeRoomApp() {
                         
                         {/* 簡介與網站 */}
                         {ev.description && (
-                          <p className="text-xs text-slate-500 mb-3 line-clamp-2">{ev.description}</p>
+                          <p className="text-xs text-slate-500 mb-3 line-clamp-2">
+                            {ev.description.length > 50 ? ev.description.substring(0, 50) + '...' : ev.description}
+                          </p>
                         )}
                         {ev.teammateNote && (
                           <div className="bg-slate-800/50 p-2 rounded-lg mb-3 border border-slate-700/50">
@@ -2114,9 +2116,17 @@ export default function EscapeRoomApp() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-sm text-slate-400 font-medium">活動簡介 (選填)</label>
-                <textarea className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none h-20 resize-none" 
-                  value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="簡單介紹劇情..." />
+                <label className="text-sm text-slate-400 font-medium">活動簡介 (選填，最多50字)</label>
+                <textarea 
+                  maxLength={50}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none h-20 resize-none" 
+                  value={formData.description} 
+                  onChange={e => setFormData({...formData, description: e.target.value})} 
+                  placeholder="簡單介紹劇情..." 
+                />
+                <div className="text-xs text-slate-500 text-right">
+                  {formData.description.length}/50
+                </div>
               </div>
 
               <div className="space-y-1.5">
@@ -2441,17 +2451,6 @@ export default function EscapeRoomApp() {
                         </div>
                         
                         <div className="flex flex-col gap-2 absolute top-4 right-4 z-20">
-                            {/* 分享按鈕 */}
-                             <button 
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleShare(ev.id);
-                                }}
-                                className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white border border-slate-700 transition-colors shadow-lg"
-                            >
-                                <Share2 size={16} />
-                            </button>
-
                             {/* 非主揪且非被檢舉人可見：若有進行中的檢舉，在右上角顯示附議按鈕 */}
                             {ev.hostUid !== user.uid && ev.pendingFlake && ev.pendingFlake.targetUid !== user.uid && (
                                 <button 
