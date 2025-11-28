@@ -166,6 +166,11 @@ export default function EscapeRoomApp() {
   const [guestNames, setGuestNames] = useState([""]); // 攜伴姓名列表
   const [showGuestModal, setShowGuestModal] = useState(false); // 攜伴輸入框
   const [guestEventId, setGuestEventId] = useState(null); // 暫存要攜伴參加的活動 ID
+  const maxEventDate = useMemo(() => {
+    const limit = new Date();
+    limit.setFullYear(limit.getFullYear() + 10);
+    return formatDate(limit);
+  }, []);
 
   // --- WebView Check & URL Params Check ---
   useEffect(() => {
@@ -1435,6 +1440,16 @@ export default function EscapeRoomApp() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!user) return;
+    if (createMode === 'event') {
+        const limitDate = new Date();
+        limitDate.setFullYear(limitDate.getFullYear() + 10, limitDate.getMonth(), limitDate.getDate());
+        limitDate.setHours(0, 0, 0, 0);
+        const eventDate = new Date(formData.date);
+        if (isNaN(eventDate.getTime()) || eventDate > limitDate) {
+            showToast(`活動日期需在 ${maxEventDate} 之前`, "error");
+            return;
+        }
+    }
 
     try {
       if (createMode === 'wish') {
@@ -2346,6 +2361,7 @@ export default function EscapeRoomApp() {
                   <label className="text-sm text-slate-400 font-medium">日期 <span className="text-red-500">*</span></label>
                   <input required type="date" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none [color-scheme:dark]" 
                         min={formatDate(new Date())}
+                        max={maxEventDate}
                     value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
                 </div>
                 <div className="space-y-1.5">
