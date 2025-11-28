@@ -101,7 +101,8 @@ const isGoogleMapsLink = (url) => {
 const getMapsUrl = (value) => {
   if (!value) return null;
   const trimmed = value.trim();
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (!trimmed) return null;
+  if (isGoogleMapsLink(trimmed)) return trimmed;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(trimmed)}`;
 };
 
@@ -1847,8 +1848,9 @@ export default function EscapeRoomApp() {
     e.preventDefault();
     if (!user) return;
     const hasChainSessions = (formData.chainSessions || []).length > 0;
-    if (!isGoogleMapsLink(formData.location)) {
-        showToast("完整地址請貼上 Google Maps 連結", "error");
+    const normalizedLocation = (formData.location || "").trim();
+    if (!normalizedLocation) {
+        showToast("請輸入完整地址或貼上 Google Maps 連結", "error");
         return;
     }
     if (createMode === 'event') {
@@ -1889,7 +1891,7 @@ export default function EscapeRoomApp() {
                 title: session.title?.trim() || "",
                 type: session.type || formData.type,
                 studio: session.studio?.trim() || formData.studio,
-                location: session.location?.trim() || formData.location,
+                location: session.location?.trim() || normalizedLocation,
                 category: session.category || formData.category,
                 region: session.region || formData.region,
                 date: session.date,
@@ -1915,7 +1917,7 @@ export default function EscapeRoomApp() {
           category: formData.category,
           type: formData.type,
           website: formData.website || "",
-          location: formData.location, // 工作室地址
+          location: normalizedLocation, // 工作室地址
           description: formData.description || "",
           hostNote: formData.teammateNote || "",
           contactLineId: formData.contactLineId || "",
@@ -1940,6 +1942,7 @@ export default function EscapeRoomApp() {
     
             await updateDoc(eventRef, {
             ...formData,
+              location: normalizedLocation,
               totalSlots: newTotalSlots,
               priceFull: formData.priceFull || formData.price,
               isFull: isFull,
@@ -1953,6 +1956,7 @@ export default function EscapeRoomApp() {
     } else {
             await addDoc(collection(db, "events"), {
         ...formData,
+              location: normalizedLocation,
               totalSlots: Number(formData.totalSlots),
         priceFull: formData.priceFull || formData.price,
         currentSlots: 1,
@@ -2964,11 +2968,11 @@ export default function EscapeRoomApp() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-sm text-slate-400 font-medium">完整地址 <span className="text-red-500">*</span></label>
+                <label className="text-sm text-slate-400 font-medium">完整地址 / Google Maps 連結 <span className="text-red-500">*</span></label>
                 <div className="relative">
                   <MapPin size={18} className="absolute left-4 top-3.5 text-slate-500" />
-                  <input required type="url" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                    value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} placeholder="請貼上 Google Maps 連結" />
+                  <input required type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                    value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} placeholder="可貼上 Google Maps 或輸入完整地址" />
                 </div>
               </div>
 
@@ -3043,11 +3047,11 @@ export default function EscapeRoomApp() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-sm text-slate-400 font-medium">工作室地址 <span className="text-red-500">*</span></label>
+                    <label className="text-sm text-slate-400 font-medium">工作室地址 / Google Maps <span className="text-red-500">*</span></label>
                     <div className="relative">
                       <MapPin size={18} className="absolute left-4 top-3.5 text-slate-500" />
-                      <input required type="url" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                        value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} placeholder="請貼上 Google Maps 連結" />
+                      <input required type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                        value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} placeholder="可貼上 Google Maps 或輸入完整地址" />
                     </div>
                   </div>
 
