@@ -1775,10 +1775,11 @@ ${url}
   const handleShareWish = (wish) => {
     const url = new URL(window.location.href);
     url.searchParams.set('wishId', wish.id);
-    // Clear other params if needed, but keeping them might be safer/easier
     url.searchParams.delete('eventId'); 
     
-    navigator.clipboard.writeText(url.toString()).then(() => {
+    const text = `我正在許願 ${wish.title} 團 如果有興趣的人歡迎點選下面連結集氣!\n\n${url.toString()}`;
+
+    navigator.clipboard.writeText(text).then(() => {
         showToast("連結已複製，快去邀請朋友集氣！");
     }).catch(err => {
         console.error('Failed to copy: ', err);
