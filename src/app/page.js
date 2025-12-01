@@ -2,10 +2,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { auth, googleProvider, db } from './firebase';
-import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithPopup, signOut, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { 
   collection, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc,
-  getDocs, query, orderBy, where, limit, startAfter, arrayUnion, arrayRemove 
+  getDocs, query, orderBy, where, limit, startAfter, arrayUnion, arrayRemove, deleteField
 } from 'firebase/firestore';
 import { 
   Plus, Users, MapPin, Calendar, Clock, DollarSign, Ghost, Search, 
@@ -88,6 +88,25 @@ const INITIAL_PROMOTIONS = [
     icon: <Users className="text-white" />
   }
 ];
+const VISITOR_USER = {
+  uid: "visitor",
+  displayName: "訪客",
+  email: "",
+  photoURL: "",
+  flakeCount: 0,
+  isBanned: false,
+  nameChangedCount: 0,
+  isVisitor: true
+};
+const ALLOW_CHAIN_CREATION = false;
+const COMMUNITY_LINK = 'https://line.me/ti/g2/04aicsfxOcNA2fRhxM1vn07e6JieIO7EqKbQZg?utm_source=invitation&utm_medium=link_copy&utm_campaign=default';
+const getDefaultFormData = () => ({
+  title: "", studio: "", region: "北部", category: "密室逃脫", date: "", time: "", 
+  price: "", priceFull: "", 
+  totalSlots: 6, location: "", type: "恐怖驚悚",
+  website: "", description: "", meetingTime: "15", duration: "120", minPlayers: 4,
+  teammateNote: "", contactLineId: "", isChainEvent: false, chainSessions: []
+});
 
 const generateRandomId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -104,6 +123,14 @@ const getMapsUrl = (value) => {
   if (!trimmed) return null;
   if (isGoogleMapsLink(trimmed)) return trimmed;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(trimmed)}`;
+};
+
+const sanitizePriceValue = (value, fallback = 0) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  const rounded = Math.round(num);
+  if (rounded < 0) return fallback;
+  return rounded;
 };
 
 const formatDate = (date) => {
@@ -129,7 +156,7 @@ const isWebView = () => {
 export default function EscapeRoomApp() {
   // --- 全域狀態 ---
   const [inWebView, setInWebView] = useState(false);
-  const [user, setUser] = useState(null); 
+const [user, setUser] = useState(VISITOR_USER);
   const [activeTab, setActiveTab] = useState('lobby'); 
   const [events, setEvents] = useState([]);
   const [wishes, setWishes] = useState([]); // 新增許願池狀態
@@ -151,7 +178,10 @@ export default function EscapeRoomApp() {
   const [filterMonth, setFilterMonth] = useState('All'); 
   const [filterPrice, setFilterPrice] = useState('All'); // 新增費用篩選
   const [filterSlots, setFilterSlots] = useState('All'); // 新增缺額篩選
-  const [filterEventId, setFilterEventId] = useState(null); // 用於分享連結的單一活動顯示
+  const [filterEventId, setFilterEventId] = useState(null);
+  const [filterWishId, setFilterWishId] = useState(null); // New state for wish filtering
+  const [wishMembersModal, setWishMembersModal] = useState({ show: false, wishId: null, members: [] });
+  const [sharePrompt, setSharePrompt] = useState({ show: false, eventId: null, eventData: null });
   const [filterHostUid, setFilterHostUid] = useState(null);
   const [filterHostName, setFilterHostName] = useState("");
   const [showCalendar, setShowCalendar] = useState(false);
@@ -173,21 +203,13 @@ export default function EscapeRoomApp() {
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [profileName, setProfileName] = useState("");
 
-  const [formData, setFormData] = useState({
-    title: "", studio: "", region: "北部", category: "密室逃脫", date: "", time: "", 
-    price: "", priceFull: "", 
-    totalSlots: 6, location: "", type: "恐怖驚悚",
-    website: "", description: "", meetingTime: "15", duration: "120", minPlayers: 4,
-    teammateNote: "", contactLineId: "",
-    isChainEvent: false,
-    chainSessions: []
-  });
+const [formData, setFormData] = useState(getDefaultFormData());
   const [createMode, setCreateMode] = useState('event'); // 'event' or 'wish'
-  const [guestNames, setGuestNames] = useState([""]); // 攜伴姓名列表
-  const [showGuestModal, setShowGuestModal] = useState(false); // 攜伴輸入框
-  const [guestEventId, setGuestEventId] = useState(null); // 暫存要攜伴參加的活動 ID
-  const [guestSessionId, setGuestSessionId] = useState('main');
-  const [guestSessionOptions, setGuestSessionOptions] = useState([]);
+const [guestNames, setGuestNames] = useState([""]); // 攜伴姓名列表
+const [showGuestModal, setShowGuestModal] = useState(false); // 攜伴輸入框
+const [guestEventId, setGuestEventId] = useState(null); // 暫存要攜伴參加的活動 ID
+const [guestSessionId, setGuestSessionId] = useState('main');
+const [guestSessionOptions, setGuestSessionOptions] = useState([]);
   const maxEventDate = useMemo(() => {
     const limit = new Date();
     limit.setFullYear(limit.getFullYear() + 10);
@@ -197,6 +219,106 @@ export default function EscapeRoomApp() {
   const [showChainModal, setShowChainModal] = useState(false);
   const [chainEventTarget, setChainEventTarget] = useState(null);
   const [chainSelection, setChainSelection] = useState({});
+const [showIdentityModal, setShowIdentityModal] = useState(false);
+const [identityIntent, setIdentityIntent] = useState(null);
+const [pendingIdentityAction, setPendingIdentityAction] = useState(null);
+const [identityFormGroup, setIdentityFormGroup] = useState("");
+const [identityStep, setIdentityStep] = useState('question');
+const hasCommunityIdentity = !!user?.communityNickname;
+
+const resetCreateForm = () => {
+  setIsEditing(false);
+  setCreateMode('event');
+  setFormData(getDefaultFormData());
+};
+
+const requireAuth = () => {
+  if (!user || user.isVisitor) {
+    showToast("請先登入再使用此功能", "info");
+    handleLogin();
+    return false;
+  }
+  return true;
+};
+
+const runWithIdentity = (intent, action) => {
+  if (!requireAuth()) return;
+  if (hasCommunityIdentity) {
+    action();
+    return;
+  }
+  setPendingIdentityAction(() => action);
+  setIdentityIntent(intent);
+  setIdentityStep('question');
+  setIdentityFormGroup(user?.communityNickname || user?.displayName || "");
+  setShowIdentityModal(true);
+};
+
+const openCreateTab = () => {
+  const proceed = () => {
+    resetCreateForm();
+    setActiveTab('create');
+  };
+  if (!requireAuth()) return;
+  if (hasCommunityIdentity) {
+    proceed();
+  } else {
+    runWithIdentity('create', proceed);
+  }
+};
+
+const openProfileTab = () => {
+  if (!requireAuth()) return;
+  setActiveTab('profile');
+};
+
+const handleIdentityModalClose = () => {
+  setShowIdentityModal(false);
+  setIdentityIntent(null);
+  setPendingIdentityAction(null);
+  setIdentityStep('question');
+};
+
+const handleIdentityConfirm = async () => {
+  if (!user) {
+    handleIdentityModalClose();
+    return;
+  }
+  const nickname = identityFormGroup.trim();
+  if (!nickname) {
+    showToast("請填寫社群暱稱", "error");
+    return;
+  }
+  try {
+    const userRef = doc(db, "users", user.uid);
+    await updateDoc(userRef, {
+      communityNickname: nickname,
+      displayName: nickname
+    });
+    setUser(prev => ({ ...prev, communityNickname: nickname, displayName: nickname }));
+    showToast("已更新社群身份", "success");
+    const action = pendingIdentityAction;
+    handleIdentityModalClose();
+    if (action) action();
+  } catch (error) {
+    console.error("Identity save failed", error);
+    showToast("儲存失敗，請稍後再試", "error");
+  }
+};
+
+const handleIdentityAnswerYes = () => setIdentityStep('group');
+const handleIdentityAnswerNo = () => {
+  if (typeof window !== 'undefined') {
+    window.open(COMMUNITY_LINK, '_blank', 'noopener,noreferrer');
+  }
+};
+const handleIdentityGroupConfirm = () => {
+  if (!identityFormGroup.trim()) {
+    showToast("請輸入社群暱稱", "error");
+    return;
+  }
+  handleIdentityConfirm();
+};
 
   // --- WebView Check & URL Params Check ---
   useEffect(() => {
@@ -204,18 +326,26 @@ export default function EscapeRoomApp() {
       setInWebView(true);
     }
     
-    // Check for shared event ID in URL
+    // Check for shared event/wish IDs in URL
     if (typeof window !== 'undefined') {
         const urlParams = new URLSearchParams(window.location.search);
         const sharedEventId = urlParams.get('eventId');
         const sharedHostUid = urlParams.get('host');
+        const sharedWishId = urlParams.get('wishId');
         if (sharedEventId) {
             setFilterEventId(sharedEventId);
             setActiveTab('lobby');
+        } else if (sharedWishId) {
+            setFilterWishId(sharedWishId);
+            setActiveTab('wishes');
         }
         if (sharedHostUid) {
             setFilterHostUid(sharedHostUid);
             setActiveTab('lobby');
+        }
+        if (sharedWishId) {
+            setFilterWishId(sharedWishId);
+            setActiveTab('wishes');
         }
     }
   }, []);
@@ -224,6 +354,12 @@ export default function EscapeRoomApp() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
+        if (currentUser.isAnonymous) {
+          setUser(VISITOR_USER);
+          setMyEvents([]);
+          setMyWaitlists([]);
+          return;
+        }
         try {
           // 嘗試從 Firestore 獲取使用者詳細資料
           const userRef = doc(db, "users", currentUser.uid);
@@ -237,9 +373,11 @@ export default function EscapeRoomApp() {
               displayName: currentUser.displayName || "匿名玩家",
               email: currentUser.email,
               photoURL: currentUser.photoURL || "https://api.dicebear.com/7.x/ghost/svg?seed=" + currentUser.uid,
-              flakeCount: 0, 
+      flakeCount: 0, 
               isBanned: false,
-              nameChangedCount: 0 // Initialize name change count
+              nameChangedCount: 0, // Initialize name change count
+              communityNickname: "",
+              isVisitor: false
             };
             await setDoc(userRef, userData, { merge: true });
           } else {
@@ -249,11 +387,14 @@ export default function EscapeRoomApp() {
                   photoURL: userData.photoURL || currentUser.photoURL || "https://api.dicebear.com/7.x/ghost/svg?seed=" + currentUser.uid,
                   email: currentUser.email,
                   lastSeen: new Date(),
-                  nameChangedCount: userData.nameChangedCount || 0 // Ensure field exists
+                  nameChangedCount: userData.nameChangedCount || 0, // Ensure field exists
+                  isVisitor: false
               }, { merge: true });
           }
 
-          setUser(userData);
+          const normalizedDisplayName = userData.communityNickname || userData.displayName || currentUser.displayName || "匿名玩家";
+          userData = { ...userData, displayName: normalizedDisplayName };
+          setUser({ ...userData, isVisitor: false });
         } catch (error) {
           console.error("Error fetching user data:", error);
           // 如果資料庫讀取失敗，至少先讓使用者登入，但顯示錯誤
@@ -262,13 +403,16 @@ export default function EscapeRoomApp() {
             displayName: currentUser.displayName || "使用者",
             email: currentUser.email,
             photoURL: currentUser.photoURL,
-      flakeCount: 0, 
-      isBanned: false 
+            flakeCount: 0, 
+            isBanned: false,
+            nameChangedCount: 0,
+            communityNickname: "",
+            isVisitor: false
           });
           showToast("資料同步錯誤，部分功能可能受限", "error");
         }
       } else {
-        setUser(null);
+        setUser(VISITOR_USER);
         setMyEvents([]);
         setMyWaitlists([]);
       }
@@ -364,6 +508,12 @@ export default function EscapeRoomApp() {
     }
   }, [guestSessionOptions, guestSessionId]);
 
+useEffect(() => {
+  setIdentityFormGroup(user?.communityNickname || "");
+}, [user?.communityNickname]);
+
+/* removed guest session syncing */
+
   // --- Sync My Events / Waitlists ---
   useEffect(() => {
     if (user && events.length > 0) {
@@ -372,8 +522,7 @@ export default function EscapeRoomApp() {
       events.forEach(ev => {
         const isParticipant = ev.participants && ev.participants.includes(user.uid);
         const hasGuestRecord = ev.guests?.some(g => g.addedByUid === user.uid);
-        const chainJoined = ev.chainSessions?.some(session => session.participants?.includes(user.uid));
-        if (isParticipant || hasGuestRecord || chainJoined) {
+        if (isParticipant || hasGuestRecord) {
           joined.push(ev.id);
         }
         if (ev.waitlist && ev.waitlist.includes(user.uid)) {
@@ -540,9 +689,33 @@ export default function EscapeRoomApp() {
   };
 
   const handleShare = (eventId) => {
+    const event = events.find(e => e.id === eventId);
     const url = `${window.location.origin}?eventId=${eventId}`;
-    navigator.clipboard.writeText(url).then(() => {
-        showToast("連結已複製！", "success");
+    
+    let text = url;
+    if (event) {
+        // Calculate current participants count
+        // For chain events, this might be complex, but for general share it's usually the main event or aggregated.
+        // Assuming simple event structure for now or main event.
+        const currentCount = event.currentSlots || ((event.participants?.length || 0) + (event.guests?.length || 0));
+        
+        text = `
+主題：${event.title}
+
+工作室：${event.studio}
+
+目前人數：${currentCount}人 滿人${event.totalSlots}人
+
+時間、日期：${event.time} ${event.date}
+
+如果有興趣加入的話，可以點擊網址報名
+
+${url}
+`.trim();
+    }
+
+    navigator.clipboard.writeText(text).then(() => {
+        showToast("活動資訊已複製！", "success");
     }).catch(err => {
         console.error('Failed to copy: ', err);
         showToast("複製失敗", "error");
@@ -692,18 +865,7 @@ export default function EscapeRoomApp() {
 
     const isHost = user && managingEvent && user.uid === managingEvent.hostUid && !isViewOnlyMode;
 
-    const getGuestSessionLabel = (guest) => {
-        if (!managingEvent || !guest?.sessionId || guest.sessionId === 'main') return '主場';
-        const sessions = managingEvent.chainSessions || [];
-        for (let i = 0; i < sessions.length; i++) {
-            const session = sessions[i];
-            const key = getChainSessionKey(session, i);
-            if (key === guest.sessionId || session.id === guest.sessionId) {
-                return `第 ${i + 2} 場：${session.title || '未命名主題'}`;
-            }
-        }
-        return '連刷場';
-    };
+    const getGuestSessionLabel = () => '主場';
 
     const matchGuestRecord = (source, target) => {
         if (!source || !target) return false;
@@ -740,9 +902,8 @@ export default function EscapeRoomApp() {
                 return;
             }
             const freedSlots = currentGuests.length - filteredGuests.length;
-            const removingFromChain = guest.sessionId && guest.sessionId !== 'main';
             const baseSlots = liveEvent.currentSlots || managingEvent.currentSlots || 0;
-            const newSlots = removingFromChain ? baseSlots : baseSlots - freedSlots;
+            const newSlots = baseSlots - freedSlots;
             const notice = guest.addedByUid ? {
                 id: generateRandomId(),
                 ownerUid: guest.addedByUid,
@@ -758,27 +919,7 @@ export default function EscapeRoomApp() {
                 guests: filteredGuests,
                 isFull: false
             };
-            if (!removingFromChain) {
-                updatePayload.currentSlots = newSlots < 0 ? 0 : newSlots;
-            }
-
-            if (removingFromChain) {
-                const updatedChainSessions = (liveEvent.chainSessions || managingEvent.chainSessions || []).map((session, index) => {
-                    const key = getChainSessionKey(session, index);
-                    if (key === guest.sessionId || session.id === guest.sessionId) {
-                        const sessionSlots = session.currentSlots ?? (session.participants?.length || 0);
-                        const adjustedSlots = Math.max(sessionSlots - freedSlots, 0);
-                        const totalSlots = session.totalSlots || liveEvent.totalSlots || 0;
-                        return {
-                            ...session,
-                            currentSlots: adjustedSlots,
-                            isFull: totalSlots ? adjustedSlots >= totalSlots : false
-                        };
-                    }
-                    return session;
-                });
-                updatePayload.chainSessions = updatedChainSessions;
-            }
+            updatePayload.currentSlots = newSlots < 0 ? 0 : newSlots;
 
             if (notice) {
                 updatePayload.guestRemovalNotices = arrayUnion(notice);
@@ -788,14 +929,7 @@ export default function EscapeRoomApp() {
             setGuestList(filteredGuests);
             setManagingEvent(prev => {
                 if (!prev || prev.id !== managingEvent.id) return prev;
-                const updated = { ...prev, guests: filteredGuests };
-                if (!removingFromChain) {
-                    updated.currentSlots = newSlots < 0 ? 0 : newSlots;
-                }
-                if (removingFromChain && updatePayload.chainSessions) {
-                    updated.chainSessions = updatePayload.chainSessions;
-                }
-                return updated;
+                return { ...prev, guests: filteredGuests, currentSlots: newSlots < 0 ? 0 : newSlots };
             });
             fetchEvents(false);
             showToast("攜伴已移除", "success");
@@ -1239,22 +1373,25 @@ export default function EscapeRoomApp() {
         showToast("您沒有權限編輯此活動", "error");
         return;
     }
+    if (ev.isChainEvent) {
+        showToast("連刷舊團目前僅供檢視，無法在此編輯", "info");
+        return;
+    }
     setFormData({
       title: ev.title, studio: ev.studio, region: ev.region || "北部", category: ev.category || "密室逃脫", date: ev.date, time: ev.time,
       price: ev.price, priceFull: ev.priceFull || ev.price,
       totalSlots: ev.totalSlots, location: ev.location, type: ev.type || "恐怖驚悚",
       website: ev.website || "", description: ev.description || "", 
       meetingTime: ev.meetingTime || "15", duration: ev.duration || "120", minPlayers: ev.minPlayers || 4,
-      teammateNote: ev.teammateNote || "", contactLineId: ev.contactLineId || "",
-      isChainEvent: ev.isChainEvent || false,
-      chainSessions: ev.chainSessions || []
+      teammateNote: ev.teammateNote || "", contactLineId: ev.contactLineId || "", isChainEvent: false, chainSessions: []
     });
     setEditingId(ev.id);
     setIsEditing(true);
     setActiveTab('create');
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id, options = {}) => {
+    const { skipConfirm = false, toastMessage = "揪團已關閉並封存" } = options;
     const eventToDelete = events.find(e => e.id === id);
     if (!eventToDelete) return;
 
@@ -1263,11 +1400,13 @@ export default function EscapeRoomApp() {
         return;
     }
 
-    if (!confirm("確定要刪除這個揪團嗎？此操作無法復原。")) return;
+    if (!skipConfirm && !confirm("確定要刪除這個揪團嗎？此操作無法復原。")) return;
     try {
+      const hostUid = eventToDelete.hostUid || user?.uid || "";
       // 1. 備份/紀錄關團資訊到 archived_events 集合
       await setDoc(doc(db, "archived_events", id), {
         ...eventToDelete,
+        hostUid,
         archivedAt: new Date(),
         finalParticipants: eventToDelete.participants || [],
         finalWaitlist: eventToDelete.waitlist || []
@@ -1275,7 +1414,7 @@ export default function EscapeRoomApp() {
 
       // 2. 從 events 集合中移除
       await deleteDoc(doc(db, "events", id));
-      showToast("揪團已關閉並封存", "success");
+      showToast(toastMessage, "success");
       fetchEvents(false); // Refresh events
     } catch (error) {
       console.error("Error removing document: ", error);
@@ -1290,7 +1429,7 @@ export default function EscapeRoomApp() {
     }));
   };
 
-  const getChainSessionKey = (session, index) => session.id || `chain-${index}`;
+  const getChainSessionKey = (session, index) => session?.id || `chain-${index}`;
 
   const getChainSessionList = (event) => {
     if (!event) return [];
@@ -1308,7 +1447,7 @@ export default function EscapeRoomApp() {
     };
     const extras = (event.chainSessions || []).map((session, idx) => ({
         id: getChainSessionKey(session, idx),
-        title: session.title,
+        title: session.title || `第 ${idx + 2} 場`,
         type: session.type || event.type,
         date: session.date,
         time: session.time,
@@ -1328,419 +1467,22 @@ export default function EscapeRoomApp() {
         options.push({
             id: 'main',
             label: `主場：${event.title}`,
-            remaining: Math.max(event.totalSlots - event.currentSlots, 0)
+            remaining: Math.max((event.totalSlots || 0) - (event.currentSlots || event.participants.length || 0), 0)
         });
     }
     (event.chainSessions || []).forEach((session, index) => {
         const sessionId = getChainSessionKey(session, index);
         if (session.participants?.includes(uid)) {
+            const total = session.totalSlots || event.totalSlots || 0;
+            const current = session.currentSlots ?? (session.participants?.length || 0);
             options.push({
                 id: sessionId,
                 label: `第 ${index + 2} 場：${session.title || '未命名主題'}`,
-                remaining: Math.max((session.totalSlots || event.totalSlots || 0) - (session.currentSlots ?? (session.participants?.length || 0)), 0)
+                remaining: Math.max(total - current, 0)
             });
         }
     });
     return options;
-  };
-
-  const promptJoin = (id) => {
-    if (!user) { showToast("請先登入！", "error"); return; }
-    if (user.flakeCount >= 3) { showToast("帳號受限。", "error"); return; }
-    const targetEvent = events.find(e => e.id === id);
-    if (!targetEvent) return;
-
-    // 如果是候補，不需要太嚴重的確認，但為了統一體驗也可以加
-    // 這裡假設直接顯示確認視窗
-    setConfirmModal({ show: true, eventId: id, action: 'join', title: targetEvent.title });
-  };
-
-  const handleViewHostProfile = (uid, name) => {
-    if (!uid) return;
-    setFilterHostUid(uid);
-    setFilterHostName(name || hostStats[uid]?.name || "");
-    setFilterEventId(null);
-    if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        url.searchParams.set('host', uid);
-        url.searchParams.delete('eventId');
-        window.history.replaceState({}, '', url);
-    }
-    setActiveTab('lobby');
-  };
-
-  const clearHostFilter = () => {
-    setFilterHostUid(null);
-    setFilterHostName("");
-    if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('host');
-        window.history.replaceState({}, '', url);
-    }
-  };
-
-  const openGuestModalForEvent = (event) => {
-    if (!user) {
-        showToast("請先登入！", "error");
-        return;
-    }
-    if (!event) return;
-    const options = getJoinedSessionsForUser(event, user.uid);
-    if (options.length === 0) {
-        showToast("請先選擇要參加的場次，再使用攜伴功能", "error");
-        return;
-    }
-    setGuestSessionOptions(options);
-    setGuestSessionId(options[0].id);
-    setGuestEventId(event.id);
-    setGuestNames([""]);
-    setShowGuestModal(true);
-  };
-
-  const closeGuestModal = () => {
-    setShowGuestModal(false);
-    setGuestEventId(null);
-    setGuestSessionOptions([]);
-    setGuestSessionId('main');
-    setGuestNames([""]);
-  };
-
-  const handleJoin = async (id) => {
-    // 這個函式現在改為由 executeAction 呼叫，或者保留給內部邏輯
-    // 為了避免混淆，我們把邏輯移到 executeAction 或獨立出來
-    // 這裡保留空殼或移除，下面會重寫 executeAction
-  };
-
-  const promptCancel = (id) => setConfirmModal({ show: true, eventId: id, action: 'cancel' });
-
-  const handleGuestJoin = async () => {
-    if (!user) {
-        showToast("請先登入！", "error");
-        return;
-    }
-    // 過濾出有效名字
-    const validGuests = guestNames.filter(name => name.trim() !== "");
-    
-    if (validGuests.length === 0) {
-        showToast("請至少輸入一位朋友的名字", "error");
-        return;
-    }
-    
-    try {
-        const targetEvent = events.find(e => e.id === guestEventId);
-        if (!targetEvent) return;
-
-        const eventRef = doc(db, "events", guestEventId);
-        const sessionTargetId = guestSessionId || 'main';
-        
-        // 準備要加入的 guests 陣列
-        const newGuests = validGuests.map(name => ({
-            id: generateRandomId(),
-            addedByUid: user.uid,
-            addedByName: user.displayName || "團員",
-            name: name.trim(),
-            addedAt: Date.now(),
-            sessionId: sessionTargetId
-        }));
-
-        if (!targetEvent.isChainEvent || sessionTargetId === 'main') {
-            const alreadyJoined = targetEvent.participants?.includes(user.uid);
-            const totalNeeded = validGuests.length + (alreadyJoined ? 0 : 1);
-            if (targetEvent.currentSlots + totalNeeded > targetEvent.totalSlots) {
-                const remaining = Math.max(targetEvent.totalSlots - targetEvent.currentSlots - (alreadyJoined ? 0 : 1), 0);
-                showToast(remaining > 0 
-                    ? `名額不足，只能再帶 ${remaining} 位朋友` 
-                    : "名額不足，請先確認剩餘空位", "error");
-                return;
-            }
-            const newSlots = targetEvent.currentSlots + totalNeeded;
-            const updatePayload = {
-                currentSlots: newSlots,
-                isFull: newSlots >= targetEvent.totalSlots,
-                guests: arrayUnion(...newGuests)
-            };
-            if (!alreadyJoined) {
-                updatePayload.participants = arrayUnion(user.uid);
-            }
-            await updateDoc(eventRef, updatePayload);
-        } else {
-            const chainSessions = [...(targetEvent.chainSessions || [])];
-            let sessionIndex = -1;
-            let sessionData = null;
-            chainSessions.forEach((session, idx) => {
-                const key = getChainSessionKey(session, idx);
-                if (key === sessionTargetId || session.id === sessionTargetId) {
-                    sessionIndex = idx;
-                    sessionData = session;
-                }
-            });
-            if (sessionIndex === -1 || !sessionData) {
-                showToast("找不到連刷場次，請重新整理後再試", "error");
-                return;
-            }
-            const totalSlots = sessionData.totalSlots || targetEvent.totalSlots || 0;
-            const currentSlots = sessionData.currentSlots ?? (sessionData.participants?.length || 0);
-            const alreadyJoinedSession = sessionData.participants?.includes(user.uid);
-            const totalNeeded = validGuests.length + (alreadyJoinedSession ? 0 : 1);
-            if (totalSlots && currentSlots + totalNeeded > totalSlots) {
-                const remaining = Math.max(totalSlots - currentSlots, 0);
-                showToast(remaining > 0 ? `此場次僅能再帶 ${remaining} 位朋友` : "此連刷場次名額不足", "error");
-                return;
-            }
-            const updatedParticipants = alreadyJoinedSession ? sessionData.participants : [...(sessionData.participants || []), user.uid];
-            chainSessions[sessionIndex] = {
-                ...sessionData,
-                participants: updatedParticipants,
-                currentSlots: currentSlots + totalNeeded,
-                isFull: totalSlots ? currentSlots + totalNeeded >= totalSlots : sessionData.isFull
-            };
-            await updateDoc(eventRef, {
-                chainSessions,
-                guests: arrayUnion(...newGuests)
-            });
-        }
-        
-        showToast(`已幫 ${validGuests.join('、')} 報名成功！`, "success");
-        closeGuestModal();
-        fetchEvents(false); // Refresh
-    } catch (error) {
-        console.error("Error adding guests:", error);
-        showToast("攜伴失敗: " + error.message, "error");
-    }
-  };
-
-  const handleDismissGuestNotice = async (eventId, notice) => {
-    if (!eventId || !notice) return;
-    try {
-        const eventRef = doc(db, "events", eventId);
-        await updateDoc(eventRef, {
-            guestRemovalNotices: arrayRemove(notice)
-        });
-        fetchEvents(false);
-    } catch (error) {
-        console.error("Error dismissing guest notice:", error);
-        showToast("無法隱藏通知", "error");
-    }
-  };
-
-  const handleJoinWish = async (wish) => {
-    if (!user) { showToast("請先登入！", "error"); return; }
-    
-    // Toggle: If already wished, cancel it
-    if (wish.wishedBy?.includes(user.uid)) {
-        handleCancelWish(wish.id);
-        return;
-    }
-
-    try {
-        const wishRef = doc(db, "wishes", wish.id);
-        await updateDoc(wishRef, {
-            wishedBy: arrayUnion(user.uid),
-            wishCount: (wish.wishCount || 0) + 1
-        });
-        showToast("集氣 +1 成功！", "success");
-        fetchWishes();
-    } catch (error) {
-        console.error("Error joining wish:", error);
-        showToast("操作失敗", "error");
-    }
-  };
-
-  const handleCancelWish = async (wishId) => {
-    if (!user) return;
-    const wish = wishes.find(w => w.id === wishId);
-    if (!wish) return;
-
-    if (!confirm(wish.hostUid === user.uid ? "確定要刪除這個許願嗎？" : "確定要取消許願嗎？")) return;
-
-    try {
-      if (wish.hostUid === user.uid) {
-        await deleteDoc(doc(db, "wishes", wishId));
-        showToast("許願已刪除", "success");
-      } else {
-        await updateDoc(doc(db, "wishes", wishId), {
-          wishedBy: arrayRemove(user.uid),
-          wishCount: (wish.wishCount || 1) - 1
-        });
-        showToast("已取消許願", "success");
-      }
-      fetchWishes(); 
-    } catch (error) {
-      console.error("Error cancelling wish:", error);
-      showToast("操作失敗", "error");
-    }
-  };
-
-  const executeAction = async () => {
-    const { eventId, action } = confirmModal;
-    
-    if (action === 'confirmFlake') {
-        const event = events.find(e => e.id === eventId);
-        if (!event || !event.pendingFlake) return;
-        const { targetUid } = event.pendingFlake;
-
-        try {
-            // 1. 更新使用者的跳車次數
-            const userRef = doc(db, "users", targetUid);
-            const userSnap = await getDoc(userRef);
-            if (userSnap.exists()) {
-                const currentFlake = userSnap.data().flakeCount || 0;
-                const newFlake = currentFlake + 1;
-                await updateDoc(userRef, {
-                    flakeCount: newFlake,
-                    isBanned: newFlake >= 3
-                });
-            }
-
-            // 2. 清除 pendingFlake 狀態，並將該使用者移除
-            const eventRef = doc(db, "events", eventId);
-            const newSlots = event.currentSlots - 1;
-            
-            await updateDoc(eventRef, {
-                pendingFlake: null,
-                participants: arrayRemove(targetUid),
-                currentSlots: newSlots < 0 ? 0 : newSlots,
-                isFull: false
-            });
-
-            showToast("檢舉成立！已記錄跳車並移除該成員", "success");
-        } catch (error) {
-            console.error("Confirm flake failed:", error);
-            showToast("附議失敗", "error");
-        }
-        setConfirmModal({ show: false, eventId: null, action: null });
-        return;
-    }
-    
-    if (action === 'join') {
-        const targetEvent = events.find(e => e.id === eventId);
-        if (!targetEvent) return;
-
-        try {
-            const eventRef = doc(db, "events", eventId);
-            if (targetEvent.currentSlots >= targetEvent.totalSlots) {
-                if (!myWaitlists.includes(eventId)) {
-                    await updateDoc(eventRef, {
-                        waitlist: arrayUnion(user.uid)
-                    });
-                    showToast("已加入候補名單！", "success");
-                }
-            } else {
-                const newSlots = targetEvent.currentSlots + 1;
-                await updateDoc(eventRef, {
-                    participants: arrayUnion(user.uid),
-                    currentSlots: newSlots,
-                    isFull: newSlots >= targetEvent.totalSlots
-                });
-                showToast(`報名成功！`, "success");
-            }
-        } catch (error) {
-            console.error("Error joining event: ", error);
-            showToast("加入失敗: " + error.message, "error");
-        }
-    } else if (action === 'cancel') {
-      const isWaitlisted = myWaitlists.includes(eventId);
-      const targetEvent = events.find(e => e.id === eventId);
-      
-      try {
-        const eventRef = doc(db, "events", eventId);
-
-      if (isWaitlisted) {
-            await updateDoc(eventRef, {
-                waitlist: arrayRemove(user.uid)
-            });
-        showToast("已取消候補申請", "success");
-        fetchEvents(false);
-      } else {
-            if (!targetEvent) return; // Should not happen
-
-            const isStillParticipant = targetEvent.participants?.includes(user.uid);
-            if (!isStillParticipant) {
-                showToast("您已不在此揪團，無需重複退出", "info");
-                fetchEvents(false);
-                setConfirmModal({ show: false, eventId: null, action: null });
-                return;
-            }
-
-            // Update user flake count
-        const newFlakeCount = user.flakeCount + 1;
-            const userRef = doc(db, "users", user.uid);
-            await updateDoc(userRef, {
-                flakeCount: newFlakeCount,
-                isBanned: newFlakeCount >= 3
-            });
-            // Update local user state immediately to reflect change
-        setUser({ ...user, flakeCount: newFlakeCount, isBanned: newFlakeCount >= 3 });
-        
-            // Remove from event (包含攜伴名單)
-            const userGuests = (targetEvent.guests || []).filter(g => g.addedByUid === user.uid);
-            const remainingGuests = (targetEvent.guests || []).filter(g => g.addedByUid !== user.uid);
-            const remainingNotices = (targetEvent.guestRemovalNotices || []).filter(n => n.ownerUid !== user.uid);
-            const slotsToRelease = 1 + userGuests.length;
-            const newSlots = targetEvent.currentSlots - slotsToRelease;
-            await updateDoc(eventRef, {
-                participants: arrayRemove(user.uid),
-                guests: remainingGuests,
-                guestRemovalNotices: remainingNotices,
-                currentSlots: newSlots < 0 ? 0 : newSlots,
-                isFull: false
-            });
-        
-        showToast(newFlakeCount >= 3 ? "跳車次數過多，帳號已凍結" : "已取消報名 (跳車+1)", "error");
-        fetchEvents(false);
-        }
-      } catch (error) {
-          console.error("Error executing action: ", error);
-          showToast("操作失敗", "error");
-      }
-    }
-    setConfirmModal({ show: false, eventId: null, action: null });
-  };
-
-  const addChainSession = () => {
-    setFormData(prev => ({
-        ...prev,
-        isChainEvent: true,
-        chainSessions: [
-            ...(prev.chainSessions || []),
-            {
-                id: generateRandomId(),
-                title: "",
-                category: prev.category,
-                region: prev.region,
-                type: prev.type,
-                website: prev.website,
-                description: prev.description,
-                teammateNote: prev.teammateNote,
-                contactLineId: prev.contactLineId,
-                meetingTime: prev.meetingTime,
-                duration: prev.duration,
-                minPlayers: prev.minPlayers,
-                studio: prev.studio,
-                location: prev.location,
-                date: "",
-                time: "",
-                price: prev.price,
-                priceFull: prev.priceFull || prev.price,
-                totalSlots: prev.totalSlots
-            }
-        ]
-    }));
-  };
-
-  const updateChainSession = (index, field, value) => {
-    setFormData(prev => {
-        const updated = [...prev.chainSessions];
-        updated[index] = { ...updated[index], [field]: value };
-        return { ...prev, chainSessions: updated };
-    });
-  };
-
-  const removeChainSession = (index) => {
-    setFormData(prev => {
-        const updated = prev.chainSessions.filter((_, idx) => idx !== index);
-        return { ...prev, chainSessions: updated, isChainEvent: updated.length > 0 };
-    });
   };
 
   const openChainSelectionModal = (event) => {
@@ -1844,8 +1586,373 @@ export default function EscapeRoomApp() {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const promptJoin = (id) => {
+    if (user?.flakeCount >= 3) { showToast("帳號受限。", "error"); return; }
+    const targetEvent = events.find(e => e.id === id);
+    if (!targetEvent) return;
+    runWithIdentity('join', () => {
+      setConfirmModal({ show: true, eventId: id, action: 'join', title: targetEvent.title });
+    });
+  };
+
+  const handleViewHostProfile = (uid, name) => {
+    if (!uid) return;
+    setFilterHostUid(uid);
+    setFilterHostName(name || hostStats[uid]?.name || "");
+    setFilterEventId(null);
+    if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('host', uid);
+        url.searchParams.delete('eventId');
+        window.history.replaceState({}, '', url);
+    }
+    setActiveTab('lobby');
+  };
+
+  const clearHostFilter = () => {
+    setFilterHostUid(null);
+    setFilterHostName("");
+    if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('host');
+        window.history.replaceState({}, '', url);
+    }
+  };
+
+  const openGuestModalForEvent = (event) => {
+    if (!user) {
+        showToast("請先登入！", "error");
+        return;
+    }
+    if (!event) return;
+    const options = getJoinedSessionsForUser(event, user.uid);
+    if (options.length === 0) {
+        showToast("請先選擇要參加的場次，再使用攜伴功能", "error");
+        return;
+    }
+    setGuestSessionOptions(options);
+    setGuestSessionId(options[0].id);
+    setGuestEventId(event.id);
+    setGuestNames([""]);
+    setShowGuestModal(true);
+  };
+
+  const closeGuestModal = () => {
+    setShowGuestModal(false);
+    setGuestEventId(null);
+    setGuestSessionOptions([]);
+    setGuestSessionId('main');
+    setGuestNames([""]);
+  };
+
+  const handleJoin = async (id) => {
+    // 這個函式現在改為由 executeAction 呼叫，或者保留給內部邏輯
+    // 為了避免混淆，我們把邏輯移到 executeAction 或獨立出來
+    // 這裡保留空殼或移除，下面會重寫 executeAction
+  };
+
+  const promptCancel = (id) => setConfirmModal({ show: true, eventId: id, action: 'cancel' });
+
+  const handleGuestJoin = async () => {
+    if (!user) {
+        showToast("請先登入！", "error");
+        return;
+    }
+    // 過濾出有效名字
+    const validGuests = guestNames.filter(name => name.trim() !== "");
+    
+    if (validGuests.length === 0) {
+        showToast("請至少輸入一位朋友的名字", "error");
+        return;
+    }
+    
+    try {
+        const targetEvent = events.find(e => e.id === guestEventId);
+        if (!targetEvent) return;
+
+        const eventRef = doc(db, "events", guestEventId);
+        
+        // 準備要加入的 guests 陣列
+        const newGuests = validGuests.map(name => ({
+            id: generateRandomId(),
+            addedByUid: user.uid,
+            addedByName: user.displayName || "團員",
+            name: name.trim(),
+            addedAt: Date.now()
+        }));
+
+        const alreadyJoined = targetEvent.participants?.includes(user.uid);
+        const totalNeeded = validGuests.length + (alreadyJoined ? 0 : 1);
+        if (targetEvent.currentSlots + totalNeeded > targetEvent.totalSlots) {
+            const remaining = Math.max(targetEvent.totalSlots - targetEvent.currentSlots - (alreadyJoined ? 0 : 1), 0);
+            showToast(remaining > 0 
+                ? `名額不足，只能再帶 ${remaining} 位朋友` 
+                : "名額不足，請先確認剩餘空位", "error");
+            return;
+        }
+        const newSlots = targetEvent.currentSlots + totalNeeded;
+        const updatePayload = {
+            currentSlots: newSlots,
+            isFull: newSlots >= targetEvent.totalSlots,
+            guests: arrayUnion(...newGuests)
+        };
+        if (!alreadyJoined) {
+            updatePayload.participants = arrayUnion(user.uid);
+        }
+        await updateDoc(eventRef, updatePayload);
+        
+        showToast(`已幫 ${validGuests.join('、')} 報名成功！`, "success");
+        closeGuestModal();
+        fetchEvents(false); // Refresh
+    } catch (error) {
+        console.error("Error adding guests:", error);
+        showToast("攜伴失敗: " + error.message, "error");
+    }
+  };
+
+  const handleDismissGuestNotice = async (eventId, notice) => {
+    if (!eventId || !notice) return;
+    try {
+        const eventRef = doc(db, "events", eventId);
+        await updateDoc(eventRef, {
+            guestRemovalNotices: arrayRemove(notice)
+        });
+        fetchEvents(false);
+    } catch (error) {
+        console.error("Error dismissing guest notice:", error);
+        showToast("無法隱藏通知", "error");
+    }
+  };
+
+  const handleJoinWish = async (wish) => {
+    if (!user) { showToast("請先登入！", "error"); return; }
+    
+    // Toggle: If already wished, cancel it
+    if (wish.wishedBy?.includes(user.uid)) {
+        handleCancelWish(wish.id);
+        return;
+    }
+
+    try {
+        const wishRef = doc(db, "wishes", wish.id);
+        await updateDoc(wishRef, {
+            wishedBy: arrayUnion(user.uid),
+            wishCount: (wish.wishCount || 0) + 1
+        });
+        showToast("集氣 +1 成功！", "success");
+        fetchWishes();
+    } catch (error) {
+        console.error("Error joining wish:", error);
+        showToast("操作失敗", "error");
+    }
+  };
+
+  const handleCancelWish = async (wishId) => {
+    if (!user) return;
+    const wish = wishes.find(w => w.id === wishId);
+    if (!wish) return;
+
+    if (!confirm(wish.hostUid === user.uid ? "確定要刪除這個許願嗎？" : "確定要取消許願嗎？")) return;
+
+    try {
+      if (wish.hostUid === user.uid) {
+        await deleteDoc(doc(db, "wishes", wishId));
+        showToast("許願已刪除", "success");
+      } else {
+        await updateDoc(doc(db, "wishes", wishId), {
+          wishedBy: arrayRemove(user.uid),
+          wishCount: (wish.wishCount || 1) - 1
+        });
+        showToast("已取消許願", "success");
+      }
+      fetchWishes(); 
+    } catch (error) {
+      console.error("Error cancelling wish:", error);
+      showToast("操作失敗", "error");
+    }
+  };
+
+  const handleShareWish = (wish) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('wishId', wish.id);
+    // Clear other params if needed, but keeping them might be safer/easier
+    url.searchParams.delete('eventId'); 
+    
+    navigator.clipboard.writeText(url.toString()).then(() => {
+        showToast("連結已複製，快去邀請朋友集氣！");
+    }).catch(err => {
+        console.error('Failed to copy: ', err);
+        showToast("複製失敗", "error");
+    });
+  };
+
+  const handleViewWishMembers = async (wish) => {
+    if (!wish.wishedBy || wish.wishedBy.length === 0) {
+        setWishMembersModal({ show: true, wishId: wish.id, members: [] });
+        return;
+    }
+
+    try {
+        // Fetch user details for all wishers
+        // Firestore 'in' query supports up to 10 items. If more, need to batch or fetch individually.
+        // Assuming wishedBy won't be huge for now, or just fetching individually.
+        // Fetching individually is safer for larger lists.
+        const memberPromises = wish.wishedBy.map(uid => getDoc(doc(db, "users", uid)));
+        const memberSnaps = await Promise.all(memberPromises);
+        const members = memberSnaps.map(snap => {
+            if (snap.exists()) {
+                const data = snap.data();
+                return { 
+                    uid: snap.id, 
+                    displayName: data.communityNickname || data.displayName || "未命名玩家", 
+                    photoURL: data.photoURL 
+                };
+            }
+            return { uid: "unknown", displayName: "未知玩家" };
+        });
+        
+        setWishMembersModal({ show: true, wishId: wish.id, members });
+    } catch (error) {
+        console.error("Error fetching wish members:", error);
+        showToast("無法載入成員名單", "error");
+    }
+  };
+
+  const executeAction = async () => {
+    const { eventId, action } = confirmModal;
+    
+    if (action === 'confirmFlake') {
+        const event = events.find(e => e.id === eventId);
+        if (!event || !event.pendingFlake) return;
+        const { targetUid } = event.pendingFlake;
+
+        try {
+            // 1. 更新使用者的跳車次數
+            const userRef = doc(db, "users", targetUid);
+            const userSnap = await getDoc(userRef);
+            if (userSnap.exists()) {
+                const currentFlake = userSnap.data().flakeCount || 0;
+                const newFlake = currentFlake + 1;
+                await updateDoc(userRef, {
+                    flakeCount: newFlake,
+                    isBanned: newFlake >= 3
+                });
+            }
+
+            // 2. 清除 pendingFlake 狀態，並將該使用者移除
+            const eventRef = doc(db, "events", eventId);
+            const newSlots = event.currentSlots - 1;
+            
+            await updateDoc(eventRef, {
+                pendingFlake: null,
+                participants: arrayRemove(targetUid),
+                currentSlots: newSlots < 0 ? 0 : newSlots,
+                isFull: false
+            });
+
+            showToast("檢舉成立！已記錄跳車並移除該成員", "success");
+        } catch (error) {
+            console.error("Confirm flake failed:", error);
+            showToast("附議失敗", "error");
+        }
+        setConfirmModal({ show: false, eventId: null, action: null });
+        return;
+    }
+    
+    if (action === 'join') {
+        const targetEvent = events.find(e => e.id === eventId);
+        if (!targetEvent) return;
+
+        try {
+            const eventRef = doc(db, "events", eventId);
+            if (targetEvent.currentSlots >= targetEvent.totalSlots) {
+                if (!myWaitlists.includes(eventId)) {
+                    await updateDoc(eventRef, {
+                        waitlist: arrayUnion(user.uid)
+                    });
+                    showToast("已加入候補名單！", "success");
+                    fetchEvents(false);
+                }
+            } else {
+                const newSlots = targetEvent.currentSlots + 1;
+                await updateDoc(eventRef, {
+                    participants: arrayUnion(user.uid),
+                    currentSlots: newSlots,
+                    isFull: newSlots >= targetEvent.totalSlots
+                });
+                showToast(`報名成功！`, "success");
+                fetchEvents(false);
+            }
+        } catch (error) {
+            console.error("Error joining event: ", error);
+            showToast("加入失敗: " + error.message, "error");
+        }
+    } else if (action === 'cancel') {
+      const isWaitlisted = myWaitlists.includes(eventId);
+      const targetEvent = events.find(e => e.id === eventId);
+      
+      try {
+        const eventRef = doc(db, "events", eventId);
+
+      if (isWaitlisted) {
+            await updateDoc(eventRef, {
+                waitlist: arrayRemove(user.uid)
+            });
+        showToast("已取消候補申請", "success");
+        fetchEvents(false);
+      } else {
+            if (!targetEvent) return; // Should not happen
+            if (targetEvent.hostUid === user.uid) {
+                await handleDelete(eventId, { skipConfirm: true, toastMessage: "主揪與攜伴已移除，揪團已刪除" });
+                setConfirmModal({ show: false, eventId: null, action: null });
+                return;
+            }
+
+            const isStillParticipant = targetEvent.participants?.includes(user.uid);
+            if (!isStillParticipant) {
+                showToast("您已不在此揪團，無需重複退出", "info");
+                fetchEvents(false);
+                setConfirmModal({ show: false, eventId: null, action: null });
+                return;
+            }
+
+            // Update user flake count
+        const newFlakeCount = user.flakeCount + 1;
+            const userRef = doc(db, "users", user.uid);
+            await updateDoc(userRef, {
+                flakeCount: newFlakeCount,
+                isBanned: newFlakeCount >= 3
+            });
+            // Update local user state immediately to reflect change
+        setUser({ ...user, flakeCount: newFlakeCount, isBanned: newFlakeCount >= 3 });
+        
+            // Remove from event (包含攜伴名單)
+            const userGuests = (targetEvent.guests || []).filter(g => g.addedByUid === user.uid);
+            const remainingGuests = (targetEvent.guests || []).filter(g => g.addedByUid !== user.uid);
+            const remainingNotices = (targetEvent.guestRemovalNotices || []).filter(n => n.ownerUid !== user.uid);
+            const slotsToRelease = 1 + userGuests.length;
+            const newSlots = targetEvent.currentSlots - slotsToRelease;
+            await updateDoc(eventRef, {
+                participants: arrayRemove(user.uid),
+                guests: remainingGuests,
+                guestRemovalNotices: remainingNotices,
+                currentSlots: newSlots < 0 ? 0 : newSlots,
+                isFull: false
+            });
+        
+        showToast(newFlakeCount >= 3 ? "跳車次數過多，帳號已凍結" : "已取消報名 (跳車+1)", "error");
+        fetchEvents(false);
+        }
+      } catch (error) {
+          console.error("Error executing action: ", error);
+          showToast("操作失敗", "error");
+      }
+    }
+    setConfirmModal({ show: false, eventId: null, action: null });
+  };
+
+
+  const processSubmit = async () => {
     if (!user) return;
     const hasChainSessions = (formData.chainSessions || []).length > 0;
     const normalizedLocation = (formData.location || "").trim();
@@ -1853,6 +1960,14 @@ export default function EscapeRoomApp() {
         showToast("請輸入完整地址或貼上 Google Maps 連結", "error");
         return;
     }
+    const normalizedPrice = sanitizePriceValue(formData.price);
+    if (normalizedPrice < 0) {
+        showToast("費用需為 0 或正整數，請重新輸入", "error");
+        return;
+    }
+    const normalizedPriceFull = formData.priceFull !== "" && formData.priceFull !== null && formData.priceFull !== undefined
+        ? sanitizePriceValue(formData.priceFull, normalizedPrice)
+        : normalizedPrice;
     if (createMode === 'event') {
         const limitDate = new Date();
         limitDate.setFullYear(limitDate.getFullYear() + 10, limitDate.getMonth(), limitDate.getDate());
@@ -1868,10 +1983,10 @@ export default function EscapeRoomApp() {
                 return;
             }
             const invalidSession = formData.chainSessions.some(session => 
-                !session.title?.trim() || !session.date || !session.time || !session.price || !session.studio?.trim() || !session.location?.trim()
+                !session.title?.trim() || !session.date || !session.time || !session.price || sanitizePriceValue(session.price) < 0 || !session.studio?.trim() || !session.location?.trim()
             );
             if (invalidSession) {
-                showToast("連刷場次資訊不完整（主題、日期、時間、價格、工作室、地址為必填）", "error");
+                showToast("連刷場次資訊不完整（主題、日期、時間、價格需為 0 或正整數、工作室、地址為必填）", "error");
                 return;
             }
         }
@@ -1879,6 +1994,10 @@ export default function EscapeRoomApp() {
 
     const sanitizedChainSessions = hasChainSessions
         ? (formData.chainSessions || []).map(session => {
+            const sessionPrice = sanitizePriceValue(session.price, normalizedPrice);
+            const sessionPriceFull = session.priceFull !== "" && session.priceFull !== null && session.priceFull !== undefined
+                ? sanitizePriceValue(session.priceFull, sessionPrice)
+                : sessionPrice;
             const totalSlots = Number(session.totalSlots || formData.totalSlots || 6);
             const existingParticipants = Array.isArray(session.participants) ? session.participants : [];
             const participants = existingParticipants.length > 0 ? existingParticipants : [user.uid];
@@ -1896,8 +2015,8 @@ export default function EscapeRoomApp() {
                 region: session.region || formData.region,
                 date: session.date,
                 time: session.time,
-                price: session.price,
-                priceFull: session.priceFull || session.price,
+                price: sessionPrice,
+                priceFull: sessionPriceFull,
                 totalSlots,
                 participants: uniqueParticipants,
                 waitlist,
@@ -1906,6 +2025,15 @@ export default function EscapeRoomApp() {
             };
         })
         : [];
+
+    const eventPayload = {
+            ...formData,
+        price: normalizedPrice,
+        priceFull: normalizedPriceFull,
+        location: normalizedLocation,
+        isChainEvent: hasChainSessions,
+        chainSessions: sanitizedChainSessions
+    };
 
     try {
       if (createMode === 'wish') {
@@ -1941,10 +2069,9 @@ export default function EscapeRoomApp() {
             const isFull = currentEvent ? currentEvent.currentSlots >= newTotalSlots : false;
     
             await updateDoc(eventRef, {
-            ...formData,
-              location: normalizedLocation,
+            ...eventPayload,
               totalSlots: newTotalSlots,
-              priceFull: formData.priceFull || formData.price,
+              priceFull: normalizedPriceFull,
               isFull: isFull,
               chainSessions: sanitizedChainSessions,
               isChainEvent: hasChainSessions
@@ -1954,26 +2081,38 @@ export default function EscapeRoomApp() {
       setIsEditing(false);
       setEditingId(null);
     } else {
-            await addDoc(collection(db, "events"), {
-        ...formData,
-              location: normalizedLocation,
-              totalSlots: Number(formData.totalSlots),
-        priceFull: formData.priceFull || formData.price,
-        currentSlots: 1,
-        isFull: false,
-              endTime: "23:59", // 簡化處理
-        tags: [formData.type],
-              host: user.displayName,
-              hostUid: user.uid,
-              participants: [user.uid],
-              waitlist: [],
-              guests: [],
-              guestRemovalNotices: [],
-              isChainEvent: hasChainSessions,
-              chainSessions: sanitizedChainSessions,
-              createdAt: new Date()
-            });
+            const newEventData = {
+                ...eventPayload,
+                totalSlots: Number(formData.totalSlots),
+                priceFull: normalizedPriceFull,
+                currentSlots: 1,
+                isFull: false,
+                endTime: "23:59", // 簡化處理
+                tags: [formData.type],
+                host: user.displayName,
+                hostUid: user.uid,
+                participants: [user.uid],
+                waitlist: [],
+                guests: [],
+                guestRemovalNotices: [],
+                isChainEvent: hasChainSessions,
+                chainSessions: sanitizedChainSessions,
+                createdAt: new Date()
+            };
+            const docRef = await addDoc(collection(db, "events"), newEventData);
       showToast("開團成功！", "success");
+      
+      setSharePrompt({
+            show: true,
+            eventId: docRef.id,
+            eventData: {
+                title: newEventData.title,
+                studio: newEventData.studio,
+                maxPlayers: newEventData.totalSlots,
+                date: newEventData.date,
+                time: newEventData.time
+            }
+        });
     }
     setActiveTab('lobby');
         // Reset Filters to ensure the new event is visible if it matches default logic
@@ -1987,16 +2126,21 @@ export default function EscapeRoomApp() {
         fetchEvents(false);
       }
     
-      setFormData({ 
-        title: "", studio: "", region: "北部", category: "密室逃脫", date: "", time: "", 
-        price: "", priceFull: "", totalSlots: 6, location: "", type: "恐怖驚悚",
-        website: "", description: "", meetingTime: "15", duration: "120", minPlayers: 4,
-        teammateNote: "", contactLineId: "", isChainEvent: false, chainSessions: []
-      });
+      setFormData(getDefaultFormData());
     } catch (error) {
       console.error("Error adding/updating document: ", error);
       showToast("操作失敗: " + error.message, "error");
     }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!requireAuth()) return;
+    if (!hasCommunityIdentity) {
+      runWithIdentity('create', () => processSubmit());
+      return;
+    }
+    processSubmit();
   };
 
   const showToast = (msg, type = "success", duration = 3000) => {
@@ -2016,22 +2160,12 @@ export default function EscapeRoomApp() {
           <span className="text-xs">優惠</span>
         </button>
         <button 
-          onClick={() => {
-            setActiveTab('create');
-            setIsEditing(false);
-            setCreateMode('event'); // Default to event mode
-          setFormData({ 
-            title: "", studio: "", region: "北部", category: "密室逃脫", date: "", time: "", 
-            price: "", priceFull: "", totalSlots: 6, location: "", type: "恐怖驚悚",
-            website: "", description: "", meetingTime: "15", duration: "120", minPlayers: 4,
-            teammateNote: "", contactLineId: ""
-          });
-          }} 
+          onClick={openCreateTab}
           className="flex flex-col items-center justify-center -mt-8 bg-emerald-500 text-white w-14 h-14 rounded-full shadow-lg shadow-emerald-500/30 active:scale-95 transition-transform"
         >
           <Plus size={28} />
         </button>
-        <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center space-y-1 ${activeTab === 'profile' ? 'text-emerald-400' : 'text-slate-500'}`}>
+        <button onClick={openProfileTab} className={`flex flex-col items-center space-y-1 ${activeTab === 'profile' ? 'text-emerald-400' : 'text-slate-500'}`}>
           <UserPlus size={24} />
           <span className="text-xs">我的</span>
         </button>
@@ -2049,7 +2183,7 @@ export default function EscapeRoomApp() {
         <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-2xl max-w-md w-full">
           <div className="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
             <AlertTriangle size={32} className="text-yellow-500" />
-          </div>
+        </div>
           <h1 className="text-2xl font-bold text-white mb-4">請使用瀏覽器開啟</h1>
           <p className="text-slate-400 mb-6 leading-relaxed">
             Google 安全政策限制在 App 內嵌瀏覽器（如 LINE, Facebook）中進行登入。
@@ -2066,44 +2200,120 @@ export default function EscapeRoomApp() {
     );
   }
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center font-sans">
-        <div className="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center border-4 border-slate-800 mb-8 shadow-xl shadow-emerald-500/10">
-          <Sparkles size={48} className="text-emerald-500" />
-        </div>
-        <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent mb-2">
-          小迷糊密室逃脫揪團平台
-        </h1>
-        <p className="text-slate-400 mb-8 max-w-xs leading-relaxed">
-          下一場冒險。從這裡出發。<br/>
-          找隊友、排行程，一次搞定。
-        </p>
-        <button onClick={handleLogin} className="w-full max-w-xs bg-white text-slate-900 font-bold py-3.5 rounded-xl flex items-center justify-center space-x-3 hover:bg-slate-100 transition-all active:scale-95">
-          <span>使用 Google 帳號登入</span>
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-24 selection:bg-emerald-500/30">
       
-       {showCalendar && <CalendarModal />}
-       
-       {showSponsorModal && <SponsorModal />}
-       
-       {showImageModal && <ImageModal />}
-       
-       {showManageModal && <ManageParticipantsModal />}
+      {showCalendar && <CalendarModal />}
+      
+      {showSponsorModal && <SponsorModal />}
+      
+      {showImageModal && <ImageModal />}
+      
+      {showManageModal && <ManageParticipantsModal />}
 
-       <header className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
+      {showIdentityModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="bg-slate-900 w-full max-w-md rounded-2xl border border-slate-800 shadow-2xl relative overflow-hidden">
+            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-cyan-400 to-purple-500" />
+            <button
+              onClick={handleIdentityModalClose}
+              className="absolute top-3 right-3 text-slate-500 hover:text-white transition-colors"
+            >
+              <X size={20} />
+            </button>
+            <div className="p-6 space-y-5">
+              <div>
+                <p className="text-xs text-emerald-300 font-semibold mb-1">最後一步</p>
+                <h3 className="text-xl font-bold text-white">確認社群身份</h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  {identityIntent === 'join'
+                    ? '為了讓主揪聯繫到你，我們需要確認你在社群中的資訊。'
+                    : '發起揪團前，請先確認你在社群中的可聯絡資訊。'}
+                </p>
+              </div>
+
+              {identityStep === 'question' && (
+                <div className="space-y-4">
+                  <p className="text-white font-semibold text-lg">你是否已經加入小迷糊的社群？</p>
+                  <div className="space-y-3">
+                    <button
+                      onClick={handleIdentityAnswerYes}
+                      className="w-full py-3 rounded-xl bg-emerald-500 text-slate-900 font-bold hover:bg-emerald-400 transition-colors"
+                    >
+                      我已在社群內
+                    </button>
+                    <button
+                      onClick={handleIdentityAnswerNo}
+                      className="w-full py-3 rounded-xl border border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-white transition-colors"
+                    >
+                      尚未加入，前往加入社群
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    將在新分頁開啟社群邀請連結，加入後請返回此視窗繼續操作。
+                  </p>
+                </div>
+              )}
+
+              {identityStep === 'group' && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm text-slate-300 font-medium">你在社群內的暱稱</label>
+                    <input
+                      type="text"
+                      value={identityFormGroup}
+                      onChange={(e) => setIdentityFormGroup(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder:text-slate-500 focus:border-emerald-500 outline-none"
+                      placeholder="請輸入社群暱稱"
+                    />
+                    <p className="text-xs text-amber-300 flex items-center gap-1">
+                      ⚠️ 此暱稱是主揪辨識你的依據，填錯可能會被移除。
+                    </p>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setIdentityStep('question')}
+                      className="flex-1 py-3 rounded-xl border border-slate-700 text-slate-300 hover:text-white"
+                    >
+                      上一步
+                    </button>
+                    <button
+                      onClick={handleIdentityGroupConfirm}
+                      className="flex-1 py-3 rounded-xl bg-emerald-500 text-slate-900 font-bold hover:bg-emerald-400"
+                    >
+                      確認參加
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 已合併暱稱輸入，移除原第三步 */}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <header className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
         <div className="px-4 py-3 flex justify-between items-center">
           <h1 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent truncate max-w-[70%]">
             小迷糊密室逃脫揪團平台
           </h1>
           <div className="flex items-center gap-3">
-            <button onClick={handleLogout} className="text-slate-400 hover:text-white"><LogOut size={18} /></button>
+            {!user?.isVisitor ? (
+              <>
+                <span className="text-xs text-slate-400 hidden sm:inline">{user.displayName}</span>
+                <button onClick={handleLogout} className="text-slate-400 hover:text-white flex items-center gap-1 text-xs">
+                  <LogOut size={16} /> 登出
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={handleLogin}
+                className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
+              >
+                使用 Google 登入
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -2820,19 +3030,35 @@ export default function EscapeRoomApp() {
                     </div>
 
                     <div className="pl-3 flex items-center justify-between mt-2 pt-3 border-t border-slate-800/50">
-                        <div className="text-xs text-slate-500">
+                        <div className="text-xs text-slate-500 mr-auto">
                             發起人：{wish.host}
                         </div>
-                        <button 
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all
-                                ${isWished 
-                                    ? 'bg-pink-500 text-white border-pink-500 hover:bg-pink-600' 
-                                    : 'bg-pink-500/10 text-pink-400 border-pink-500/20 hover:bg-pink-500/20'}`}
-                            onClick={() => handleJoinWish(wish)}
-                        >
-                            <Heart size={14} className={isWished ? "fill-current" : ""} />
-                            {isWished ? `已集氣 (${wish.wishCount || 0})` : `集氣 +1 (${wish.wishCount || 0})`}
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => handleViewWishMembers(wish)}
+                                className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:bg-slate-700 hover:text-emerald-400 transition-colors"
+                                title="查看成員"
+                            >
+                                <Users size={16} />
+                            </button>
+                             <button
+                                onClick={() => handleShareWish(wish)}
+                                className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:bg-slate-700 hover:text-emerald-400 transition-colors"
+                                title="分享"
+                            >
+                                <Share2 size={16} />
+                            </button>
+                            <button 
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all
+                                    ${isWished 
+                                        ? 'bg-pink-500 text-white border-pink-500 hover:bg-pink-600' 
+                                        : 'bg-pink-500/10 text-pink-400 border-pink-500/20 hover:bg-pink-500/20'}`}
+                                onClick={() => handleJoinWish(wish)}
+                            >
+                                <Heart size={14} className={isWished ? "fill-current" : ""} />
+                                {isWished ? `已集氣` : `集氣 +1`}
+                            </button>
+                        </div>
                     </div>
                   </div>
                 )})
@@ -3002,7 +3228,7 @@ export default function EscapeRoomApp() {
                     <label className="text-sm text-slate-400 font-medium">未滿團/基本價 <span className="text-red-500">*</span></label>
                     <div className="relative">
                       <span className="absolute left-4 top-3.5 text-slate-500">$</span>
-                      <input required type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                      <input required type="number" min="0" step="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
                         value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} placeholder="600" />
                     </div>
                   </div>
@@ -3010,7 +3236,7 @@ export default function EscapeRoomApp() {
                     <label className="text-sm text-slate-400 font-medium">滿團優惠價 (選填)</label>
                     <div className="relative">
                       <span className="absolute left-4 top-3.5 text-slate-500">$</span>
-                      <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                      <input type="number" min="0" step="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
                         value={formData.priceFull} onChange={e => setFormData({...formData, priceFull: e.target.value})} placeholder="550" />
                     </div>
                   </div>
@@ -3075,191 +3301,12 @@ export default function EscapeRoomApp() {
               )}
 
               {createMode === 'event' && (
-                <div className="space-y-4 pt-6 border-t border-slate-800/50 mt-8">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                      <Sparkles size={18} className="text-amber-400" />
-                      連刷場次
-                    </h3>
-                  </div>
-                  
-                  {(formData.chainSessions || []).map((session, index) => (
-                    <details key={session.id || index} className="group bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden" open>
-                      <summary className="flex items-center justify-between p-4 cursor-pointer bg-slate-900 select-none hover:bg-slate-800/50 transition-colors">
-                          <span className="font-bold text-white text-sm flex items-center gap-2">
-                            <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-xs border border-slate-700">第 {index + 2} 場</span>
-                            {session.title || '(未命名)'}
-                          </span>
-                          <div className="flex items-center gap-3">
-                             <button type="button" onClick={(e) => { e.preventDefault(); removeChainSession(index); }} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-500/10">
-                               <Trash2 size={12} /> 移除
-                             </button>
-                             <ChevronDown size={16} className="text-slate-500 transition-transform group-open:rotate-180" />
-                          </div>
-                      </summary>
-                      <div className="p-4 space-y-5 border-t border-slate-800">
-                         <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                                <label className="text-sm text-slate-400 font-medium">活動分類</label>
-                                <select className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none"
-                                  value={session.category} onChange={e => updateChainSession(index, 'category', e.target.value)}>
-                                  {['密室逃脫', '劇本殺', 'TRPG', '桌遊'].map(c => <option key={c} value={c}>{c}</option>)}
-                                </select>
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-sm text-slate-400 font-medium">所在地區</label>
-                                <select className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none"
-                                  value={session.region} onChange={e => updateChainSession(index, 'region', e.target.value)}>
-                                  {['北部', '中部', '南部', '東部', '離島'].map(r => <option key={r} value={r}>{r}</option>)}
-                                </select>
-                            </div>
-                         </div>
-
-                         <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                                <label className="text-sm text-slate-400 font-medium">主題名稱 <span className="text-red-500">*</span></label>
-                                <input type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                                  value={session.title} onChange={e => updateChainSession(index, 'title', e.target.value)} placeholder="例如: 籠中鳥" />
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-sm text-slate-400 font-medium">密室類型</label>
-                                <div className="relative">
-                                  <Tag size={18} className="absolute left-4 top-3.5 text-slate-500" />
-                                  <select className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none appearance-none"
-                                    value={session.type} onChange={e => updateChainSession(index, 'type', e.target.value)}>
-                                    {['恐怖驚悚', '機關冒險', '劇情沉浸', '推理懸疑', '歡樂新手'].map(t => <option key={t} value={t}>{t}</option>)}
-                                  </select>
-                                </div>
-                            </div>
-                         </div>
-
-                         <div className="space-y-1.5">
-                              <label className="text-sm text-slate-400 font-medium">官網連結 (選填)</label>
-                              <div className="relative">
-                                <Globe size={18} className="absolute left-4 top-3.5 text-slate-500" />
-                                <input type="url" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                                  value={session.website} onChange={e => updateChainSession(index, 'website', e.target.value)} placeholder="https://..." />
-                              </div>
-                          </div>
-
-                          <div className="space-y-1.5">
-                              <label className="text-sm text-slate-400 font-medium">活動簡介 (選填)</label>
-                              <textarea 
-                                maxLength={50}
-                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none h-20 resize-none" 
-                                value={session.description} 
-                                onChange={e => updateChainSession(index, 'description', e.target.value)} 
-                                placeholder="簡單介紹劇情..." 
-                              />
-                          </div>
-
-                           <div className="space-y-1.5">
-                              <label className="text-sm text-slate-400 font-medium">想找的隊友 (選填)</label>
-                              <input type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                                value={session.teammateNote} onChange={e => updateChainSession(index, 'teammateNote', e.target.value)} placeholder="例如：缺坦克..." />
-                            </div>
-
-                            <div className="space-y-1.5">
-                              <label className="text-sm text-slate-400 font-medium">主揪社群名稱 (參加後才可見)</label>
-                              <input type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                                value={session.contactLineId} onChange={e => updateChainSession(index, 'contactLineId', e.target.value)} placeholder="方便大家聯繫你" />
-                            </div>
-
-                          <div className="grid grid-cols-3 gap-3">
-                                  <div className="space-y-1.5">
-                                    <label className="text-xs text-slate-400 font-medium">提前抵達(分)</label>
-                                    <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
-                                      value={session.meetingTime} onChange={e => updateChainSession(index, 'meetingTime', e.target.value)} placeholder="15" />
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <label className="text-xs text-slate-400 font-medium">遊戲總時長(分)</label>
-                                    <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
-                                      value={session.duration} onChange={e => updateChainSession(index, 'duration', e.target.value)} placeholder="120" />
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <label className="text-xs text-slate-400 font-medium">成團最低人數</label>
-                                    <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-3 text-white focus:border-emerald-500 outline-none text-center" 
-                                      value={session.minPlayers} onChange={e => updateChainSession(index, 'minPlayers', e.target.value)} placeholder="4" />
-                              </div>
-                          </div>
-
-                           <div className="space-y-1.5">
-                              <label className="text-sm text-slate-400 font-medium">工作室 <span className="text-red-500">*</span></label>
-                              <input required type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                                value={session.studio} onChange={e => updateChainSession(index, 'studio', e.target.value)} />
-                            </div>
-
-                            <div className="space-y-1.5">
-                              <label className="text-sm text-slate-400 font-medium">完整地址 <span className="text-red-500">*</span></label>
-                              <div className="relative">
-                                <MapPin size={18} className="absolute left-4 top-3.5 text-slate-500" />
-                                <input required type="url" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                                  value={session.location} onChange={e => updateChainSession(index, 'location', e.target.value)} placeholder="請貼上 Google Maps 連結" />
-                              </div>
-                            </div>
-                          
-                          <div className="grid grid-cols-2 gap-4">
-                              <div className="space-y-1.5">
-                                <label className="text-sm text-slate-400 font-medium">日期 <span className="text-red-500">*</span></label>
-                                <input required type="date" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none [color-scheme:dark]" 
-                                      min={formatDate(new Date())}
-                                      max={maxEventDate}
-                                  value={session.date} onChange={e => updateChainSession(index, 'date', e.target.value)} />
-                              </div>
-                              <div className="space-y-1.5">
-                                <label className="text-sm text-slate-400 font-medium">時間 <span className="text-red-500">*</span></label>
-                                <input required type="time" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none [color-scheme:dark]" 
-                                  value={session.time} onChange={e => updateChainSession(index, 'time', e.target.value)} />
-                              </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                  <label className="text-sm text-slate-400 font-medium">未滿團/基本價 <span className="text-red-500">*</span></label>
-                                  <div className="relative">
-                                    <span className="absolute left-4 top-3.5 text-slate-500">$</span>
-                                    <input required type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                                      value={session.price} onChange={e => updateChainSession(index, 'price', e.target.value)} placeholder="600" />
-                                  </div>
-                                </div>
-                                <div className="space-y-1.5">
-                                  <label className="text-sm text-slate-400 font-medium">滿團優惠價 (選填)</label>
-                                  <div className="relative">
-                                    <span className="absolute left-4 top-3.5 text-slate-500">$</span>
-                                    <input type="number" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                                      value={session.priceFull} onChange={e => updateChainSession(index, 'priceFull', e.target.value)} placeholder="550" />
-                                  </div>
-                                </div>
-                          </div>
-
-                          <div className="space-y-1.5">
-                              <label className="text-sm text-slate-400 font-medium">總人數 <span className="text-red-500">*</span></label>
-                              <div className="relative">
-                                <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
-                                    <input 
-                                      type="number" 
-                                      required 
-                                      min="2" 
-                                      max="20"
-                                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
-                                      value={session.totalSlots} 
-                                      onChange={e => updateChainSession(index, 'totalSlots', e.target.value)}
-                                      placeholder="請輸入人數"
-                                    />
-                              </div>
-                          </div>
-                      </div>
-                    </details>
-                  ))}
-
-                  <button 
-                    type="button"
-                    onClick={addChainSession}
-                    className="w-full py-3 rounded-xl border border-dashed border-emerald-500/30 text-emerald-300 text-sm font-bold hover:bg-emerald-500/10 transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Plus size={16} />
-                    新增連刷場次
-                  </button>
+                <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 text-sm text-slate-400 space-y-2">
+                  <h4 className="font-semibold text-white flex items-center gap-2">
+                    <Sparkles size={16} className="text-amber-400" />
+                    連刷場次暫停新增
+                  </h4>
+                  <p>目前平台已停止新增連刷團，舊有資料仍會在大廳與我的活動中顯示，若需要協助請聯繫管理員。</p>
                 </div>
               )}
 
@@ -3384,13 +3431,29 @@ export default function EscapeRoomApp() {
                             )}
                           </div>
                         </div>
-                        <button 
-                            onClick={() => handleCancelWish(wish.id)}
-                            className="p-2 bg-slate-800 rounded-xl text-slate-400 hover:text-red-400 border border-slate-700 transition-colors shrink-0"
-                            title={wish.hostUid === user.uid ? "刪除許願" : "取消許願"}
-                        >
-                            {wish.hostUid === user.uid ? <Trash2 size={16} /> : <LogOut size={16} />}
-                        </button>
+                        <div className="flex gap-2 shrink-0">
+                            <button
+                                onClick={() => handleViewWishMembers(wish)}
+                                className="p-2 bg-slate-800 rounded-xl text-slate-400 hover:text-emerald-400 border border-slate-700 transition-colors"
+                                title="查看成員"
+                            >
+                                <Users size={16} />
+                            </button>
+                            <button
+                                onClick={() => handleShareWish(wish)}
+                                className="p-2 bg-slate-800 rounded-xl text-slate-400 hover:text-emerald-400 border border-slate-700 transition-colors"
+                                title="分享許願"
+                            >
+                                <Share2 size={16} />
+                            </button>
+                            <button 
+                                onClick={() => handleCancelWish(wish.id)}
+                                className="p-2 bg-slate-800 rounded-xl text-slate-400 hover:text-red-400 border border-slate-700 transition-colors"
+                                title={wish.hostUid === user.uid ? "刪除許願" : "取消許願"}
+                            >
+                                {wish.hostUid === user.uid ? <Trash2 size={16} /> : <LogOut size={16} />}
+                            </button>
+                        </div>
                        </div>
                        
                        {/* Progress Bar */}
@@ -3425,6 +3488,7 @@ export default function EscapeRoomApp() {
                   const isWaitlisted = myWaitlists.includes(ev.id);
                   const guestNotices = (ev.guestRemovalNotices || []).filter(n => n.ownerUid === user.uid);
                   const locationLink = getMapsUrl(ev.location);
+                  const isHost = ev.hostUid === user.uid;
                   return (
                     <div key={ev.id} className="bg-slate-900 rounded-3xl p-5 border border-slate-800 mb-6 shadow-xl relative overflow-hidden group">
                       {/* 頂部裝飾條 */}
@@ -3683,13 +3747,24 @@ export default function EscapeRoomApp() {
                       </button>
 
                       <button 
-                        onClick={() => promptCancel(ev.id)} 
+                        disabled={isHost}
+                        onClick={() => {
+                            if (isHost) {
+                                showToast("主揪請使用垃圾桶按鈕關團，無法自行跳車", "info");
+                                return;
+                            }
+                            promptCancel(ev.id);
+                        }} 
                         className={`w-full py-3 rounded-xl text-sm font-bold flex items-center justify-center border transition-all active:scale-95
-                          ${isWaitlisted 
-                            ? 'bg-slate-900 text-slate-500 border-slate-800 hover:bg-slate-800 hover:text-slate-300' 
-                            : 'bg-red-500/5 text-red-400 border-red-500/10 hover:bg-red-500/10'}`}
+                          ${isHost
+                            ? 'bg-slate-900 text-slate-500 border-slate-800 cursor-not-allowed'
+                            : isWaitlisted 
+                              ? 'bg-slate-900 text-slate-500 border-slate-800 hover:bg-slate-800 hover:text-slate-300' 
+                              : 'bg-red-500/5 text-red-400 border-red-500/10 hover:bg-red-500/10'}`}
                       >
-                        {isWaitlisted ? (
+                        {isHost ? (
+                          <> <Ban size={16} className="mr-2" /> 主揪請用垃圾桶關團 </>
+                        ) : isWaitlisted ? (
                           <> <X size={16} className="mr-2" /> 取消候補申請</>
                         ) : (
                           <> <LogOut size={16} className="mr-2" /> 退出此揪團 (跳車)</>
@@ -3715,49 +3790,95 @@ export default function EscapeRoomApp() {
         )}
         {activeTab === 'about' && (
           <div className="space-y-6 animate-in fade-in duration-300">
-            <h2 className="text-2xl font-bold text-white mb-4 text-center">關於我們</h2>
-            
-            {/* 作者卡片 */}
-            <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-lg text-center relative overflow-hidden">
-               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-cyan-500"></div>
-               <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center border-4 border-slate-700 mx-auto mb-3 relative">
-                  <Ghost size={40} className="text-emerald-500 animate-pulse" />
-               </div>
-               <h3 className="text-xl font-bold text-white mb-1">Hi 我是小迷糊</h3>
-               <p className="text-emerald-400 text-xs font-bold mb-4">發起人 / 笨蛋</p>
-               <p className="text-slate-400 text-sm leading-relaxed mb-4">
-                 我是笨蛋<br/>
-                 這個東西是用愛發電<br/>
-                 你的支持是我們的動力<br/>
-                 歡迎贊助我們一杯咖啡 ☕
-               </p>
-               <button 
-                 onClick={() => setShowSponsorModal(true)}
-                 className="w-full py-2.5 rounded-xl bg-emerald-500 text-slate-900 font-bold text-sm shadow-lg shadow-emerald-500/20 hover:bg-emerald-400 active:scale-95 transition-all flex items-center justify-center gap-2"
-               >
-                 <Coffee size={16} />
-                 贊助小迷糊
-               </button>
+            <div className="text-center py-8">
+              <div className="w-20 h-20 bg-emerald-500 rounded-full mx-auto mb-4 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                <Sparkles size={40} className="text-white" />
+              </div>
+              <h1 className="text-2xl font-bold text-white mb-2">小迷糊密室逃脫揪團平台</h1>
+              <p className="text-slate-400">v1.0.0</p>
             </div>
 
-            {/* 協作者卡片 */}
-            <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 shadow-lg flex items-center gap-4">
-               <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center border-2 border-slate-700 shrink-0">
-                  <span className="text-2xl">👻</span>
-               </div>
-               <div>
-                 <h3 className="text-lg font-bold text-white">飄</h3>
-                 <p className="text-indigo-400 text-xs font-bold mb-1">協作者 / 維運</p>
-                 <p className="text-slate-400 text-xs">
-                   我是飄，負責維運。<br/>
-                   偶爾幫忙修修 bug。
-                 </p>
-               </div>
+            <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 space-y-6">
+                
+                {/* Founder */}
+                <div className="text-center">
+                    <h3 className="text-emerald-400 font-bold mb-1">Founder</h3>
+                    <div className="text-xl font-bold text-white mb-3">小迷糊</div>
+                    <div className="flex gap-3 justify-center">
+                        <button 
+                            onClick={() => setShowSponsorModal(true)}
+                            className="px-4 py-2 bg-pink-500/10 text-pink-400 rounded-xl text-sm font-bold hover:bg-pink-500/20 transition-colors"
+                        >
+                            贊助小迷糊
+                        </button>
+                        <a 
+                            href="https://www.instagram.com/hu._escaperoom/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-4 py-2 bg-purple-500/10 text-purple-400 rounded-xl text-sm font-bold hover:bg-purple-500/20 transition-colors flex items-center gap-2"
+                        >
+                            聯繫小迷糊
+                            <ExternalLink size={14} />
+                        </a>
+                    </div>
+                </div>
+
+                <div className="h-px bg-slate-800 w-full" />
+
+                {/* Engineer */}
+                <div className="text-center">
+                    <h3 className="text-blue-400 font-bold mb-1">用愛發電工程師</h3>
+                    <div className="text-xl font-bold text-white mb-1">曠</div>
+                    <div className="text-sm text-slate-400 mb-2">運營小工作室 NextEdge AI Studio</div>
+                    <p className="text-xs text-slate-500 mb-3">
+                        "有需要做網頁可以找你！報小迷糊名字有折扣"
+                    </p>
+                    <a 
+                        href="https://nextedge-ai-studio.com"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2 bg-blue-500/10 text-blue-400 rounded-xl text-sm font-bold hover:bg-blue-500/20 transition-colors inline-flex items-center gap-2"
+                    >
+                        NextEdge AI Studio 官網
+                        <ExternalLink size={14} />
+                    </a>
+                </div>
+
+                <div className="h-px bg-slate-800 w-full" />
+
+                {/* Co-Maintainer */}
+                <div className="text-center">
+                    <h3 className="text-indigo-400 font-bold mb-1">協作者 / 維運</h3>
+                    <div className="flex items-center justify-center gap-3 mb-1">
+                        <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700">
+                             <span className="text-xl">👻</span>
+                        </div>
+                        <div className="text-xl font-bold text-white">飄</div>
+                    </div>
+                    <div className="text-sm text-slate-400">我是飄，負責維運。</div>
+                    <div className="text-sm text-slate-400">偶爾幫忙修修 bug。</div>
+                </div>
+
+                 <div className="h-px bg-slate-800 w-full" />
+                 
+                 {/* Terms */}
+                 <div>
+                    <h3 className="text-slate-400 font-bold mb-3 text-center">[ 使用條款 ]</h3>
+                    <div className="text-xs text-slate-500 space-y-2 leading-relaxed bg-slate-950/50 p-4 rounded-xl">
+                        <p>1. 本平台僅提供資訊交流與媒合，不介入實際交易與糾紛處理。</p>
+                        <p>2. 請使用者保持友善交流，禁止騷擾、詐騙或發表不當言論。</p>
+                        <p>3. 參加活動請準時出席，若無法參加請提前告知主揪。</p>
+                        <p>4. 平台有權移除違規內容或停用違規帳號。</p>
+                        <p>5. 相關活動風險請自行評估，本平台不負連帶責任。</p>
+                    </div>
+                 </div>
+
             </div>
 
-            <div className="text-center text-slate-600 text-xs mt-8">
-              <p>小迷糊密室逃脫揪團 APP v1.0.0</p>
-              <p>© 2023 All Rights Reserved.</p>
+            <div className="text-center pb-8">
+              <p className="text-slate-500 text-xs">
+                © {new Date().getFullYear()} NextEdge AI Studio. All Rights Reserved.
+              </p>
             </div>
           </div>
         )}
@@ -3982,6 +4103,106 @@ export default function EscapeRoomApp() {
                 {confirmModal.action === 'join' ? '確認參加' : confirmModal.action === 'confirmFlake' ? '確認附議' : '確認執行'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wish Members Modal */}
+      {wishMembersModal.show && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-800/50">
+                <h3 className="text-lg font-bold text-white flex items-center">
+                    <Users size={20} className="mr-2 text-pink-400" />
+                    已集氣成員
+                </h3>
+                <button 
+                    onClick={() => setWishMembersModal({ show: false, wishId: null, members: [] })}
+                    className="text-slate-500 hover:text-white transition-colors"
+                >
+                    <X size={20} />
+                </button>
+            </div>
+            <div className="p-4 max-h-[60vh] overflow-y-auto space-y-3">
+                {wishMembersModal.members.length === 0 ? (
+                    <p className="text-center text-slate-500 py-4">還沒有人集氣，快去邀請朋友吧！</p>
+                ) : (
+                    wishMembersModal.members.map((member) => (
+                        <div key={member.uid} className="flex items-center gap-3 bg-slate-800/30 p-3 rounded-xl border border-slate-800/50">
+                            {member.photoURL ? (
+                                <img src={member.photoURL} alt={member.displayName} className="w-10 h-10 rounded-full border border-slate-700" />
+                            ) : (
+                                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-slate-400">
+                                    <User size={20} />
+                                </div>
+                            )}
+                            <div>
+                                <div className="text-sm font-bold text-white">{member.displayName}</div>
+                                <div className="text-xs text-slate-500">集氣夥伴</div>
+                            </div>
+                        </div>
+                    ))
+                )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share Prompt Modal */}
+      {sharePrompt.show && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-800 shadow-xl overflow-hidden animate-in zoom-in-95 duration-200">
+             <div className="p-6 text-center space-y-4">
+                <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-2">
+                    <CheckCircle size={32} className="text-emerald-500" />
+                </div>
+                <h3 className="text-xl font-bold text-white">開團成功！</h3>
+                <p className="text-slate-400 text-sm">
+                    現在就分享到 LINE 社群，<br/>邀請大家一起來玩吧！
+                </p>
+                
+                <button
+                    onClick={() => {
+                        const { eventId, eventData } = sharePrompt;
+                        const shareUrl = `${window.location.origin}?eventId=${eventId}`;
+                        const text = `
+主題：${eventData.title}
+
+工作室：${eventData.studio}
+
+目前人數：1人 滿人${eventData.maxPlayers}人
+
+時間、日期：${eventData.time} ${eventData.date}
+
+如果有興趣加入的話，可以點擊網址報名
+
+${shareUrl}
+`.trim();
+                        
+                        // Copy to clipboard first
+                        navigator.clipboard.writeText(text).then(() => {
+                            showToast("內容已複製！正在開啟 LINE...");
+                            // Try to open LINE share
+                            window.open(`https://line.me/R/msg/text/?${encodeURIComponent(text)}`, '_blank');
+                        }).catch(() => {
+                             window.open(`https://line.me/R/msg/text/?${encodeURIComponent(text)}`, '_blank');
+                        });
+                        
+                        setSharePrompt({ show: false, eventId: null, eventData: null });
+                    }}
+                    className="w-full py-3 bg-[#06C755] hover:bg-[#05b64d] text-white font-bold rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
+                >
+                    <Share2 size={20} />
+                    分享至 LINE 社群
+                </button>
+                
+                <button
+                    onClick={() => setSharePrompt({ show: false, eventId: null, eventData: null })}
+                    className="text-slate-500 text-sm hover:text-white transition-colors"
+                >
+                    稍後再說
+                </button>
+             </div>
           </div>
         </div>
       )}
