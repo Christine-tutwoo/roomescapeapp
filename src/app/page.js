@@ -708,6 +708,8 @@ useEffect(() => {
 
 時間、日期：${event.time} ${event.date}
 
+費用：$${event.price}/人
+
 如果有興趣加入的話，可以點擊網址報名
 
 ${url}
@@ -2111,7 +2113,8 @@ ${url}
                 studio: newEventData.studio,
                 maxPlayers: newEventData.totalSlots,
                 date: newEventData.date,
-                time: newEventData.time
+                time: newEventData.time,
+                price: newEventData.price
             }
         });
     }
@@ -4202,6 +4205,8 @@ ${url}
 目前人數：1人 滿人${eventData.maxPlayers}人
 
 時間、日期：${eventData.time} ${eventData.date}
+
+費用：$${eventData.price}/人
 
 如果有興趣加入的話，可以點擊網址報名
 
