@@ -103,7 +103,7 @@ const COMMUNITY_LINK = 'https://line.me/ti/g2/04aicsfxOcNA2fRhxM1vn07e6JieIO7EqK
 const getDefaultFormData = () => ({
   title: "", studio: "", region: "北部", category: "密室逃脫", date: "", time: "", 
   price: "", priceFull: "", 
-  totalSlots: 6, location: "", type: "恐怖驚悚",
+  totalSlots: 6, builtInPlayers: 0, location: "", type: "恐怖驚悚",
   website: "", description: "", meetingTime: "15", duration: "120", minPlayers: 4,
   teammateNote: "", contactLineId: "", isChainEvent: false, chainSessions: []
 });
@@ -131,6 +131,24 @@ const sanitizePriceValue = (value, fallback = 0) => {
   const rounded = Math.round(num);
   if (rounded < 0) return fallback;
   return rounded;
+};
+
+const getBuiltInCount = (event) => {
+  if (!event) return 0;
+  const value = Number(event.builtInPlayers);
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+};
+
+const getEffectiveCurrentSlots = (event) => {
+  if (!event) return 0;
+  const current = Number(event.currentSlots || 0);
+  return current + getBuiltInCount(event);
+};
+
+const getRemainingSlots = (event) => {
+  if (!event) return 0;
+  const total = Number(event.totalSlots || 0);
+  return Math.max(total - getEffectiveCurrentSlots(event), 0);
 };
 
 const formatDate = (date) => {
@@ -579,8 +597,8 @@ useEffect(() => {
             };
         }
         stats[ev.hostUid].count += 1;
-        if (!ev.isFull) stats[ev.hostUid].active += 1;
-        if (ev.totalSlots > ev.currentSlots) stats[ev.hostUid].missing += 1;
+        if (getRemainingSlots(ev) > 0) stats[ev.hostUid].active += 1;
+        if (getRemainingSlots(ev) > 0) stats[ev.hostUid].missing += 1;
     });
     return stats;
   }, [events]);
@@ -645,15 +663,15 @@ useEffect(() => {
 
     // 新增缺額篩選
     if (filterSlots !== 'All') {
-        filtered = filtered.filter(ev => {
-            const slotsLeft = ev.totalSlots - ev.currentSlots;
-            if (filterSlots === 'available') return slotsLeft > 0;
-            if (filterSlots === 'full') return slotsLeft <= 0;
-            if (filterSlots === '1') return slotsLeft === 1;
-            if (filterSlots === '2') return slotsLeft === 2;
-            if (filterSlots === '3+') return slotsLeft >= 3;
-            return true;
-    });
+      filtered = filtered.filter(ev => {
+        const slotsLeft = getRemainingSlots(ev);
+        if (filterSlots === 'available') return slotsLeft > 0;
+        if (filterSlots === 'full') return slotsLeft <= 0;
+        if (filterSlots === '1') return slotsLeft === 1;
+        if (filterSlots === '2') return slotsLeft === 2;
+        if (filterSlots === '3+') return slotsLeft >= 3;
+        return true;
+      });
     }
 
     // 3. 搜尋過濾
@@ -694,10 +712,8 @@ useEffect(() => {
     
     let text = url;
     if (event) {
-        // Calculate current participants count
-        // For chain events, this might be complex, but for general share it's usually the main event or aggregated.
-        // Assuming simple event structure for now or main event.
-        const currentCount = event.currentSlots || ((event.participants?.length || 0) + (event.guests?.length || 0));
+        const actualParticipants = event.currentSlots || ((event.participants?.length || 0) + (event.guests?.length || 0));
+        const currentCount = actualParticipants + getBuiltInCount(event);
         
         text = `
 主題：${event.title}
@@ -1298,8 +1314,8 @@ ${url}
                                                 <span>{ev.studio}</span>
                                             </div>
                                         </div>
-                                        <div className={`text-xs px-2 py-1 rounded font-bold ${ev.currentSlots >= ev.totalSlots ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
-                                            {ev.currentSlots >= ev.totalSlots ? '滿' : `缺${ev.totalSlots - ev.currentSlots}`}
+                                        <div className={`text-xs px-2 py-1 rounded font-bold ${getRemainingSlots(ev) === 0 ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                                            {getRemainingSlots(ev) === 0 ? '滿' : `缺${getRemainingSlots(ev)}`}
                                         </div>
                                     </div>
                                 ))
@@ -1959,6 +1975,13 @@ ${url}
     if (!user) return;
     const hasChainSessions = (formData.chainSessions || []).length > 0;
     const normalizedLocation = (formData.location || "").trim();
+    const totalSlotsNumber = Number(formData.totalSlots || 0);
+    const builtInCount = createMode === 'event'
+      ? Math.min(
+          Math.max(0, Number(formData.builtInPlayers) || 0),
+          Math.max(0, totalSlotsNumber - 1)
+        )
+      : 0;
     if (!normalizedLocation) {
         showToast("請輸入完整地址或貼上 Google Maps 連結", "error");
         return;
@@ -2001,7 +2024,7 @@ ${url}
             const sessionPriceFull = session.priceFull !== "" && session.priceFull !== null && session.priceFull !== undefined
                 ? sanitizePriceValue(session.priceFull, sessionPrice)
                 : sessionPrice;
-            const totalSlots = Number(session.totalSlots || formData.totalSlots || 6);
+        const totalSlots = Number(session.totalSlots || formData.totalSlots || 6);
             const existingParticipants = Array.isArray(session.participants) ? session.participants : [];
             const participants = existingParticipants.length > 0 ? existingParticipants : [user.uid];
             const uniqueParticipants = Array.from(new Set(participants));
@@ -2034,6 +2057,7 @@ ${url}
         price: normalizedPrice,
         priceFull: normalizedPriceFull,
         location: normalizedLocation,
+        builtInPlayers: builtInCount,
         isChainEvent: hasChainSessions,
         chainSessions: sanitizedChainSessions
     };
@@ -2557,10 +2581,11 @@ ${url}
               getFilteredEvents().map((ev) => {
                 const isJoined = myEvents.includes(ev.id);
                 const isWaitlisted = myWaitlists.includes(ev.id);
-                const freeSlots = Math.max(ev.totalSlots - ev.currentSlots, 0);
+                const freeSlots = getRemainingSlots(ev);
                 const companionAvailable = freeSlots - (isJoined ? 0 : 1) > 0;
                 const locationLink = getMapsUrl(ev.location);
                 const joinedSessionOptions = ev.isChainEvent ? getJoinedSessionsForUser(ev, user?.uid) : [];
+                const eventIsFull = getRemainingSlots(ev) === 0;
                 const chainGuestAvailable = joinedSessionOptions.some(opt => opt.remaining > 0);
                 const chainJoinedCount = (() => {
                   if (!ev.isChainEvent || !user) return 0;
@@ -2577,7 +2602,7 @@ ${url}
                     ? 'bg-slate-800 text-emerald-400 border border-emerald-500/20 cursor-not-allowed' 
                     : isWaitlisted
                       ? 'bg-slate-800 text-yellow-400 border border-yellow-500/20 cursor-not-allowed'
-                      : ev.isFull 
+                      : eventIsFull 
                         ? 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 border border-yellow-500/20' 
                         : 'bg-emerald-500 text-slate-900 hover:bg-emerald-400 shadow-lg shadow-emerald-500/20 border border-transparent';
                 
@@ -2770,12 +2795,12 @@ ${url}
                     <div className="mb-4">
                       <div className="flex justify-between text-xs mb-1.5">
                         <span className="text-slate-400">主揪：{ev.host}</span>
-                        <span className={ev.isFull ? "text-red-400" : "text-emerald-400"}>
-                          {ev.isFull ? "額滿" : `缺 ${ev.totalSlots - ev.currentSlots} 人`}
+                        <span className={eventIsFull ? "text-red-400" : "text-emerald-400"}>
+                          {eventIsFull ? "額滿" : `缺 ${getRemainingSlots(ev)} 人`}
                         </span>
                       </div>
                       <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full transition-all duration-500 ${ev.isFull ? 'bg-slate-600' : 'bg-emerald-500'}`} style={{ width: `${(ev.currentSlots / ev.totalSlots) * 100}%` }} />
+                        <div className={`h-full rounded-full transition-all duration-500 ${eventIsFull ? 'bg-slate-600' : 'bg-emerald-500'}`} style={{ width: `${ev.totalSlots ? Math.min((getEffectiveCurrentSlots(ev) / ev.totalSlots) * 100, 100) : 0}%` }} />
                       </div>
                     </div>
 
@@ -2813,14 +2838,14 @@ ${url}
                         <><CheckCircle size={16} className="mr-2"/> 已參加 (正取)</>
                       ) : isWaitlisted ? (
                         <><Hourglass size={16} className="mr-2"/> 已在候補名單</>
-                      ) : ev.isFull ? (
+                    ) : eventIsFull ? (
                         '額滿，排候補'
                       ) : (
                         <><UserPlus size={16} className="mr-2"/> 我要 +1</>
                       )}
                     </button>
 
-                        {((!ev.isChainEvent && !isWaitlisted && !ev.isFull && companionAvailable) || (ev.isChainEvent && chainGuestAvailable)) && (
+                        {((!ev.isChainEvent && !isWaitlisted && !eventIsFull && companionAvailable) || (ev.isChainEvent && chainGuestAvailable)) && (
                             <button 
                                 onClick={() => {
                                     if (ev.isChainEvent) {
@@ -3186,9 +3211,9 @@ ${url}
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-sm text-slate-400 font-medium">想找的隊友 (選填)</label>
+                <label className="text-sm text-slate-400 font-medium">主揪備註 (選填)</label>
                 <input type="text" className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                  value={formData.teammateNote} onChange={e => setFormData({...formData, teammateNote: e.target.value})} placeholder="例如：缺坦克、需要會解謎的..." />
+                  value={formData.teammateNote} onChange={e => setFormData({...formData, teammateNote: e.target.value})} placeholder="想提醒隊友的事項..." />
               </div>
 
               <div className="space-y-1.5">
@@ -3276,20 +3301,37 @@ ${url}
                 <p className="text-xs text-slate-500">若有設定滿團價，大廳會顯示「(滿團 $550)」供玩家參考。</p>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-sm text-slate-400 font-medium">總人數 <span className="text-red-500">*</span></label>
-                <div className="relative">
-                  <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
-                      <input 
-                        type="number" 
-                        required 
-                        min="2" 
-                        max="20"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
-                        value={formData.totalSlots} 
-                        onChange={e => setFormData({...formData, totalSlots: e.target.value})}
-                        placeholder="請輸入人數"
-                      />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-sm text-slate-400 font-medium">總人數 <span className="text-red-500">*</span></label>
+                  <div className="relative">
+                    <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
+                    <input 
+                      type="number" 
+                      required 
+                      min="2" 
+                      max="20"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
+                      value={formData.totalSlots} 
+                      onChange={e => setFormData({...formData, totalSlots: e.target.value})}
+                      placeholder="請輸入人數"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm text-slate-400 font-medium">內建人數 (選填)</label>
+                  <div className="relative">
+                    <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
+                    <input
+                      type="number"
+                      min="0"
+                      max="20"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
+                      value={formData.builtInPlayers || ''}
+                      onChange={e => setFormData({...formData, builtInPlayers: e.target.value})}
+                      placeholder="已有隊友人數"
+                    />
+                  </div>
                 </div>
               </div>
                 </>
