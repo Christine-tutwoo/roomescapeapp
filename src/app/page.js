@@ -2085,10 +2085,10 @@ ${url}
                 ...eventPayload,
                 totalSlots: Number(formData.totalSlots),
                 priceFull: normalizedPriceFull,
-                currentSlots: 1,
-                isFull: false,
+        currentSlots: 1,
+        isFull: false,
                 endTime: "23:59", // 簡化處理
-                tags: [formData.type],
+        tags: [formData.type],
                 host: user.displayName,
                 hostUid: user.uid,
                 participants: [user.uid],
@@ -2230,7 +2230,7 @@ ${url}
                     ? '為了讓主揪聯繫到你，我們需要確認你在社群中的資訊。'
                     : '發起揪團前，請先確認你在社群中的可聯絡資訊。'}
                 </p>
-              </div>
+            </div>
 
               {identityStep === 'question' && (
                 <div className="space-y-4">
@@ -2252,8 +2252,8 @@ ${url}
                   <p className="text-xs text-slate-500">
                     將在新分頁開啟社群邀請連結，加入後請返回此視窗繼續操作。
                   </p>
-                </div>
-              )}
+          </div>
+        )}
 
               {identityStep === 'group' && (
                 <div className="space-y-4">
@@ -2939,16 +2939,44 @@ ${url}
 
         {activeTab === 'wishes' && (
           <div className="space-y-4 animate-in fade-in duration-300">
+            {/* Shared Wish Indicator */}
+            {filterWishId && (
+                <div className="mb-4 p-4 bg-pink-500/10 border border-pink-500/20 rounded-xl flex items-center justify-between">
+                    <div className="flex items-center text-pink-400 font-bold">
+                        <Sparkles size={20} className="mr-2 animate-pulse" />
+                        正在檢視分享的許願
+                    </div>
+                    <button 
+                        onClick={() => {
+                            setFilterWishId(null);
+                            const url = new URL(window.location);
+                            url.searchParams.delete('wishId');
+                            window.history.pushState({}, '', url);
+                        }}
+                        className="bg-pink-500 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-pink-400 transition-colors"
+                    >
+                        查看所有許願
+                    </button>
+                </div>
+            )}
+
             <div className="grid gap-4">
-              {wishes.length === 0 ? (
+              {(filterWishId ? wishes.filter(w => w.id === filterWishId) : wishes).length === 0 ? (
                 <div className="text-center py-10">
-                  <p className="text-slate-500 mb-4">目前還沒有人許願</p>
-                  <button onClick={() => { setActiveTab('create'); setCreateMode('wish'); }} className="px-4 py-2 bg-pink-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-pink-500/20 hover:bg-pink-400 transition-all">
-                    我來許第一個願！
-                  </button>
+                  <p className="text-slate-500 mb-4">{filterWishId ? "找不到該許願，可能已被刪除" : "目前還沒有人許願"}</p>
+                  {!filterWishId && (
+                    <button onClick={() => { setActiveTab('create'); setCreateMode('wish'); }} className="px-4 py-2 bg-pink-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-pink-500/20 hover:bg-pink-400 transition-all">
+                        我來許第一個願！
+                    </button>
+                  )}
+                  {filterWishId && (
+                    <button onClick={() => setFilterWishId(null)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-sm font-bold hover:bg-slate-700 transition-all">
+                        查看所有許願
+                    </button>
+                  )}
                 </div>
               ) : (
-                wishes.map(wish => {
+                (filterWishId ? wishes.filter(w => w.id === filterWishId) : wishes).map(wish => {
                   const currentCount = wish.wishCount || 1;
                   const targetCount = wish.targetCount || 4;
                   const isFull = currentCount >= targetCount;
