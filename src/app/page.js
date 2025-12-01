@@ -202,6 +202,10 @@ const [user, setUser] = useState(VISITOR_USER);
   const [sharePrompt, setSharePrompt] = useState({ show: false, eventId: null, eventData: null });
   const [filterHostUid, setFilterHostUid] = useState(null);
   const [filterHostName, setFilterHostName] = useState("");
+  const [viewingHostUid, setViewingHostUid] = useState(null); // 查看主揪檔案的 UID
+  const [viewingHostName, setViewingHostName] = useState(""); // 查看主揪檔案的名稱
+  const [viewingHostPhotoURL, setViewingHostPhotoURL] = useState(null); // 查看主揪的頭貼
+  const [hostHistoryEvents, setHostHistoryEvents] = useState([]); // 主揪的歷史活動
   const [showCalendar, setShowCalendar] = useState(false);
   const [searchQuery, setSearchQuery] = useState(''); // 新增搜尋狀態
 
@@ -356,10 +360,23 @@ const handleIdentityGroupConfirm = () => {
         } else if (sharedWishId) {
             setFilterWishId(sharedWishId);
             setActiveTab('wishes');
-        }
-        if (sharedHostUid) {
-            setFilterHostUid(sharedHostUid);
-            setActiveTab('lobby');
+        } else if (sharedHostUid) {
+            // 如果有 host 參數，打開主揪檔案頁面
+            setViewingHostUid(sharedHostUid);
+            fetchHostHistory(sharedHostUid);
+            // 獲取主揪的用戶資料（包括頭貼）
+            getDoc(doc(db, "users", sharedHostUid)).then(userDoc => {
+                if (userDoc.exists()) {
+                    const userData = userDoc.data();
+                    setViewingHostPhotoURL(userData.photoURL || null);
+                } else {
+                    setViewingHostPhotoURL(null);
+                }
+            }).catch(error => {
+                console.error("Error fetching host user data:", error);
+                setViewingHostPhotoURL(null);
+            });
+            setActiveTab('hostProfile');
         }
         if (sharedWishId) {
             setFilterWishId(sharedWishId);
@@ -1613,18 +1630,59 @@ ${url}
     });
   };
 
-  const handleViewHostProfile = (uid, name) => {
-    if (!uid) return;
-    setFilterHostUid(uid);
-    setFilterHostName(name || hostStats[uid]?.name || "");
-    setFilterEventId(null);
-    if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        url.searchParams.set('host', uid);
-        url.searchParams.delete('eventId');
-        window.history.replaceState({}, '', url);
+  const fetchHostHistory = async (hostUid) => {
+    try {
+      // 獲取該主揪的所有活動（包括已結束的）
+      // 直接使用不需要索引的查詢，然後在客戶端排序
+      const q = query(
+        collection(db, "events"),
+        where("hostUid", "==", hostUid)
+      );
+      const querySnapshot = await getDocs(q);
+      const historyEvents = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+        .sort((a, b) => {
+          // 按日期和時間降序排序（最新的在前）
+          const dateA = a.date || '';
+          const dateB = b.date || '';
+          if (dateA !== dateB) {
+            return dateB.localeCompare(dateA); // 日期降序
+          }
+          // 如果日期相同，按時間降序
+          const timeA = a.time || '00:00';
+          const timeB = b.time || '00:00';
+          return timeB.localeCompare(timeA);
+        });
+      setHostHistoryEvents(historyEvents);
+    } catch (error) {
+      console.error("Error fetching host history:", error);
+      showToast("無法載入歷史記錄", "error");
+      setHostHistoryEvents([]);
     }
-    setActiveTab('lobby');
+  };
+
+  const handleViewHostProfile = async (uid, name) => {
+    if (!uid) return;
+    setViewingHostUid(uid);
+    setViewingHostName(name || hostStats[uid]?.name || "");
+    setFilterEventId(null);
+    setFilterWishId(null);
+    
+    // 獲取主揪的用戶資料（包括頭貼）
+    try {
+      const userDoc = await getDoc(doc(db, "users", uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        setViewingHostPhotoURL(userData.photoURL || null);
+    } else {
+        setViewingHostPhotoURL(null);
+      }
+    } catch (error) {
+      console.error("Error fetching host user data:", error);
+      setViewingHostPhotoURL(null);
+    }
+    
+    fetchHostHistory(uid);
+    setActiveTab('hostProfile');
   };
 
   const clearHostFilter = () => {
@@ -2793,8 +2851,7 @@ ${url}
                     </div>
 
                     <div className="mb-4">
-                      <div className="flex justify-between text-xs mb-1.5">
-                        <span className="text-slate-400">主揪：{ev.host}</span>
+                      <div className="flex justify-start text-xs mb-1.5">
                         <span className={eventIsFull ? "text-red-400" : "text-emerald-400"}>
                           {eventIsFull ? "額滿" : `缺 ${getRemainingSlots(ev)} 人`}
                         </span>
@@ -3302,10 +3359,10 @@ ${url}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-sm text-slate-400 font-medium">總人數 <span className="text-red-500">*</span></label>
-                  <div className="relative">
-                    <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
+              <div className="space-y-1.5">
+                <label className="text-sm text-slate-400 font-medium">總人數 <span className="text-red-500">*</span></label>
+                <div className="relative">
+                  <Users size={18} className="absolute left-4 top-3.5 text-slate-500" />
                     <input 
                       type="number" 
                       required 
@@ -3316,8 +3373,8 @@ ${url}
                       onChange={e => setFormData({...formData, totalSlots: e.target.value})}
                       placeholder="請輸入人數"
                     />
-                  </div>
                 </div>
+              </div>
                 <div className="space-y-1.5">
                   <label className="text-sm text-slate-400 font-medium">內建人數 (選填)</label>
                   <div className="relative">
@@ -3862,6 +3919,182 @@ ${url}
             </div>
           </div>
         )}
+        {activeTab === 'hostProfile' && viewingHostUid && (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800 text-center relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-cyan-500" />
+              
+              <button 
+                onClick={() => {
+                  setViewingHostUid(null);
+                  setViewingHostName("");
+                  setViewingHostPhotoURL(null);
+                  setActiveTab('lobby');
+                }}
+                className="absolute top-4 left-4 p-2 rounded-full text-slate-400 hover:text-white bg-slate-800/50 transition-colors"
+              >
+                <ArrowLeft size={18} />
+              </button>
+
+              <div className="flex items-center justify-center mb-4">
+                <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center border-2 border-slate-700 relative overflow-hidden">
+                  {viewingHostPhotoURL ? (
+                    <img src={viewingHostPhotoURL} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <User size={40} className="text-slate-500"/>
+                  )}
+                </div>
+              </div>
+
+              <h2 className="text-xl font-bold text-white mb-2">{viewingHostName || '主揪'}</h2>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                Lv.{Math.max(1, hostStats[viewingHostUid]?.count || 1)}
+              </span>
+
+              <div className="grid grid-cols-3 gap-3 mt-4">
+                <div className="bg-slate-800/50 rounded-xl p-3 border border-slate-700">
+                  <p className="text-xs text-slate-500">歷史開團</p>
+                  <p className="text-lg font-bold text-white">{hostHistoryEvents.length}</p>
+                </div>
+                <div className="bg-slate-800/50 rounded-xl p-3 border border-slate-700">
+                  <p className="text-xs text-slate-500">進行中</p>
+                  <p className="text-lg font-bold text-emerald-400">
+                    {hostHistoryEvents.filter(ev => {
+                      const todayStr = formatDate(new Date());
+                      const eventDate = new Date(ev.date);
+                      eventDate.setHours(0, 0, 0, 0);
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      return eventDate >= today && !ev.isFull;
+                    }).length}
+                  </p>
+                </div>
+                <div className="bg-slate-800/50 rounded-xl p-3 border border-slate-700">
+                  <p className="text-xs text-slate-500">缺人場次</p>
+                  <p className="text-lg font-bold text-yellow-300">
+                    {hostHistoryEvents.filter(ev => {
+                      const todayStr = formatDate(new Date());
+                      const eventDate = new Date(ev.date);
+                      eventDate.setHours(0, 0, 0, 0);
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      return eventDate >= today && ev.totalSlots > getEffectiveCurrentSlots(ev);
+                    }).length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-lg font-bold text-white px-1 mb-3">歷史開團記錄</h3>
+              {hostHistoryEvents.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 bg-slate-900/50 rounded-3xl border border-slate-800 border-dashed">
+                  還沒有開團記錄
+                </div>
+              ) : (
+                hostHistoryEvents.map(ev => {
+                  const todayStr = formatDate(new Date());
+                  const eventDate = new Date(ev.date);
+                  eventDate.setHours(0, 0, 0, 0);
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const isPast = eventDate < today;
+                  const locationLink = getMapsUrl(ev.location);
+                  const eventIsFull = getEffectiveCurrentSlots(ev) >= ev.totalSlots;
+
+                  return (
+                    <div key={ev.id} className="bg-slate-900 rounded-3xl p-5 border border-slate-800 mb-6 shadow-xl relative overflow-hidden group">
+                      <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-70" />
+
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            {isPast ? (
+                              <span className="text-xs font-bold bg-slate-500/10 text-slate-400 px-2.5 py-1 rounded-lg border border-slate-500/20">
+                                已結束
+                              </span>
+                            ) : eventIsFull ? (
+                              <span className="text-xs font-bold bg-red-500/10 text-red-400 px-2.5 py-1 rounded-lg border border-red-500/20">
+                                額滿
+                              </span>
+                            ) : (
+                              <span className="text-xs font-bold bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                                進行中
+                              </span>
+                            )}
+                            <span className="text-xs font-medium text-slate-500 px-2 py-1 bg-slate-800 rounded-lg">
+                              {ev.region}
+                            </span>
+                            {ev.isChainEvent && (
+                              <span className="text-xs font-bold bg-amber-500/15 text-amber-300 px-2 py-1 rounded-lg border border-amber-500/30 flex items-center gap-1">
+                                <Sparkles size={12} />
+                                連刷 x{1 + (ev.chainSessions?.length || 0)}
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="text-xl font-bold text-white mb-1.5 leading-tight">{ev.title}</h3>
+                          <div className="text-sm font-medium text-slate-400 flex items-center mb-2">
+                            <MapPin size={14} className="mr-1.5 text-slate-500" />
+                            {locationLink ? (
+                              <a
+                                href={locationLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-emerald-300 hover:text-emerald-200 underline-offset-2 hover:underline transition-colors"
+                              >
+                                {ev.studio || '查看地圖'}
+                              </a>
+                            ) : (
+                              ev.studio
+                            )}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-xs text-slate-400 mb-2">
+                            <div className="flex items-center gap-1">
+                              <Calendar size={12} className="text-slate-500" /> {ev.date || '-'}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Clock size={12} className="text-slate-500" /> {ev.time || '-'}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <DollarSign size={12} className="text-slate-500" /> ${ev.price || '—'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mb-4">
+                        <div className="flex justify-start text-xs mb-1.5">
+                          <span className={eventIsFull ? "text-red-400" : "text-emerald-400"}>
+                            {eventIsFull ? "額滿" : `缺 ${getRemainingSlots(ev)} 人`}
+                          </span>
+                        </div>
+                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-500 ${eventIsFull ? 'bg-slate-600' : 'bg-emerald-500'}`} 
+                            style={{ width: `${ev.totalSlots ? Math.min((getEffectiveCurrentSlots(ev) / ev.totalSlots) * 100, 100) : 0}%` }} 
+                          />
+                        </div>
+                      </div>
+
+                      <button 
+                        onClick={() => {
+                          setManagingEvent(ev);
+                          setIsViewOnlyMode(true);
+                          setShowManageModal(true);
+                        }}
+                        className="w-full py-2.5 bg-slate-800 text-slate-300 rounded-xl text-sm font-bold hover:bg-slate-700 hover:text-white transition-all border border-slate-700 flex items-center justify-center gap-2"
+                      >
+                        <Users size={16} className="text-emerald-400" />
+                        查看參加成員
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
         {activeTab === 'about' && (
           <div className="space-y-6 animate-in fade-in duration-300">
             <div className="text-center py-8">
