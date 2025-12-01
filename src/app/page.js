@@ -2381,21 +2381,28 @@ ${url}
 
       <header className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
         <div className="px-4 py-3 flex justify-between items-center">
-          <h1 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent truncate max-w-[70%]">
-            小迷糊密室逃脫揪團平台
-          </h1>
+          <div className="flex items-center gap-2 max-w-[70%]">
+            <img 
+              src="/logo.png" 
+              alt="小迷糊 Logo" 
+              className="w-8 h-8 rounded-full object-cover shrink-0"
+            />
+            <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent truncate">
+              小迷糊密室逃脫揪團平台
+            </h1>
+          </div>
           <div className="flex items-center gap-3">
             {!user?.isVisitor ? (
               <>
-                <span className="text-xs text-slate-400 hidden sm:inline">{user.displayName}</span>
-                <button onClick={handleLogout} className="text-slate-400 hover:text-white flex items-center gap-1 text-xs">
-                  <LogOut size={16} /> 登出
+                <span className="text-sm text-slate-400 hidden sm:inline">{user.displayName}</span>
+                <button onClick={handleLogout} className="text-slate-400 hover:text-white flex items-center gap-1 text-sm">
+                  <LogOut size={18} /> 登出
                 </button>
               </>
             ) : (
               <button
                 onClick={handleLogin}
-                className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
+                className="text-sm font-bold px-4 py-2 rounded-lg bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
               >
                 使用 Google 登入
               </button>
@@ -2465,8 +2472,12 @@ ${url}
               <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-2xl -mr-8 -mt-8"></div>
               
               <div className="flex items-center gap-3 relative z-10">
-                <div className="bg-white/20 p-2.5 rounded-full backdrop-blur-sm border border-white/20">
-                  <MessageCircle size={22} className="text-white" />
+                <div className="bg-white/20 p-1 rounded-full backdrop-blur-sm border border-white/20">
+                  <img 
+                    src="/logo.png" 
+                    alt="小迷糊 Logo" 
+                    className="w-14 h-14 rounded-full object-cover"
+                  />
                 </div>
                 <div>
                   <div className="font-bold text-sm md:text-base">加入小迷糊密室社群</div>
@@ -4098,8 +4109,12 @@ ${url}
         {activeTab === 'about' && (
           <div className="space-y-6 animate-in fade-in duration-300">
             <div className="text-center py-8">
-              <div className="w-20 h-20 bg-emerald-500 rounded-full mx-auto mb-4 flex items-center justify-center shadow-lg shadow-emerald-500/30">
-                <Sparkles size={40} className="text-white" />
+              <div className="w-32 h-32 mx-auto mb-4 flex items-center justify-center">
+                <img 
+                  src="/logo.png" 
+                  alt="小迷糊密室逃脫揪團平台 Logo" 
+                  className="w-full h-full object-contain rounded-full"
+                />
               </div>
               <h1 className="text-2xl font-bold text-white mb-2">小迷糊密室逃脫揪團平台</h1>
               <p className="text-slate-400">v1.0.0</p>
