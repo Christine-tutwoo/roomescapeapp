@@ -144,130 +144,97 @@ const QUIZ_CHARACTERS = [
     id: 'hamster',
     name: '瑟瑟發抖倉鼠',
     emoji: '🐹',
-    description: '啊啊啊啊！不要過來！你是 NPC 眼中的 MVP，尖叫聲讓整場都有情緒價值。',
-    // 歡樂高 + 膽量是最低的屬性
-    condition: (scores, top2, bottom) => bottom === 'courage' || (top2.includes('humor') && scores.courage <= 4),
+    description: '我不要！我看不到！不要弄我！只要眼睛閉起來，鬼就不存在。你的功能僅限於「尖叫」和「被笑」。',
+    // 膽量最低 + 歡樂高
+    // 雷達：膽量0 領導0 邏輯1 觀察1 團隊2 歡樂5
+    condition: (scores, top2, bottom) => bottom === 'courage' || (scores.courage <= 3 && scores.humor >= 5),
     bestMatch: 'tank',
-    bestMatchName: '鋼鐵坦克',
-    enemy: 'brute',
-    enemyName: '暴力解鎖王',
+    bestMatchName: '無情肉盾坦克',
+    enemy: 'commander',
+    enemyName: '碎碎念場控隊長',
     gradient: 'from-pink-400 to-orange-400'
   },
   {
-    id: 'brute',
-    name: '暴力解鎖王',
-    emoji: '🔓',
-    description: '我不小心打開了欸...我只是隨便轉轉。你擁有「絕對強運」的超能力！',
-    // 膽量 + 歡樂組合，但邏輯低
-    condition: (scores, top2, bottom) => top2.includes('courage') && top2.includes('humor'),
-    bestMatch: 'hamster',
-    bestMatchName: '瑟瑟發抖倉鼠',
-    enemy: 'brain',
-    enemyName: '通靈軍師',
-    gradient: 'from-orange-500 to-red-500'
-  },
-  {
     id: 'tank',
-    name: '鋼鐵坦克',
+    name: '無情肉盾坦克',
     emoji: '🛡️',
-    description: '別怕，躲我後面，是假人啦。黑暗對你來說只是另一種顏色的燈光。',
-    // 膽量 + 領導組合
-    condition: (scores, top2) => top2.includes('courage') && top2.includes('leadership'),
+    description: '去哪？前面嗎？喔好。你是可移動式障礙物，對黑暗無感，鬼跳出來時你可能還在發呆。',
+    // 膽量最高 + 團隊高（工具人）
+    // 雷達：膽量5 領導2 邏輯2 觀察2 團隊5 歡樂2
+    condition: (scores, top2) => top2[0] === 'courage' || (top2.includes('courage') && top2.includes('teamwork')),
     bestMatch: 'hamster',
     bestMatchName: '瑟瑟發抖倉鼠',
     enemy: 'actor',
-    enemyName: '沉浸式影帝',
+    enemyName: '入戲太深影帝',
     gradient: 'from-slate-600 to-zinc-700'
   },
   {
-    id: 'actor',
-    name: '沉浸式影帝',
-    emoji: '🎭',
-    description: '嗚嗚嗚...原來小美是這樣死的...太可憐了。你是最尊重設計者的玩家。',
-    // 團隊 + 觀察組合
-    condition: (scores, top2) => top2.includes('teamwork') && top2.includes('observation'),
-    bestMatch: 'tank',
-    bestMatchName: '鋼鐵坦克',
-    enemy: 'brute',
-    enemyName: '暴力解鎖王',
-    gradient: 'from-purple-500 to-pink-500'
-  },
-  {
-    id: 'brain',
-    name: '通靈軍師',
-    emoji: '🧠',
-    description: '根據這四個符號的排列，密碼是 520。你是行走的人體 CPU。',
-    // 邏輯最高
-    condition: (scores, top2) => top2[0] === 'logic',
+    id: 'commander',
+    name: '碎碎念場控隊長',
+    emoji: '📋',
+    description: '我們先把找到的東西集中！那個誰，你去解那邊！你是密室真正的核心，最會整理資訊。',
+    // 領導最高 + 團隊高
+    // 雷達：膽量3 領導5 邏輯4 觀察3 團隊5 歡樂1
+    condition: (scores, top2) => top2[0] === 'leadership' || (top2.includes('leadership') && top2.includes('teamwork')),
     bestMatch: 'scanner',
-    bestMatchName: '人體掃描機',
-    enemy: 'brute',
-    enemyName: '暴力解鎖王',
-    gradient: 'from-blue-500 to-indigo-600'
-  },
-  {
-    id: 'scanner',
-    name: '人體掃描機',
-    emoji: '🔍',
-    description: '欸！這裡有一把鑰匙！沙發縫裡還有一個硬幣！你擁有全場最強動態視力。',
-    // 觀察最高
-    condition: (scores, top2) => top2[0] === 'observation',
-    bestMatch: 'brain',
-    bestMatchName: '通靈軍師',
+    bestMatchName: '地毯式搜索掃描機',
     enemy: 'hamster',
     enemyName: '瑟瑟發抖倉鼠',
-    gradient: 'from-emerald-500 to-teal-600'
-  },
-  {
-    id: 'tank_solo',
-    name: '鋼鐵坦克',
-    emoji: '🛡️',
-    description: '別怕，躲我後面，是假人啦。黑暗對你來說只是另一種顏色的燈光。',
-    // 膽量最高（單獨）
-    condition: (scores, top2) => top2[0] === 'courage',
-    bestMatch: 'hamster',
-    bestMatchName: '瑟瑟發抖倉鼠',
-    enemy: 'actor',
-    enemyName: '沉浸式影帝',
-    gradient: 'from-slate-600 to-zinc-700'
-  },
-  {
-    id: 'actor_solo',
-    name: '沉浸式影帝',
-    emoji: '🎭',
-    description: '嗚嗚嗚...原來小美是這樣死的...太可憐了。你是最尊重設計者的玩家。',
-    // 團隊最高（單獨）
-    condition: (scores, top2) => top2[0] === 'teamwork',
-    bestMatch: 'tank',
-    bestMatchName: '鋼鐵坦克',
-    enemy: 'brute',
-    enemyName: '暴力解鎖王',
-    gradient: 'from-purple-500 to-pink-500'
-  },
-  {
-    id: 'leader',
-    name: '鋼鐵坦克',
-    emoji: '🛡️',
-    description: '別怕，躲我後面。你是隊伍的箭頭，負責走第一個開路！',
-    // 領導最高
-    condition: (scores, top2) => top2[0] === 'leadership',
-    bestMatch: 'hamster',
-    bestMatchName: '瑟瑟發抖倉鼠',
-    enemy: 'actor',
-    enemyName: '沉浸式影帝',
     gradient: 'from-amber-500 to-orange-600'
   },
   {
-    id: 'hamster_fun',
+    id: 'scanner',
+    name: '地毯式搜索掃描機',
+    emoji: '🔍',
+    description: '這本書重重的...裡面有夾層！你會默默蹲在角落摸櫃子底版，然後遞出一把鑰匙說「喔，剛摸到的」。',
+    // 觀察最高
+    // 雷達：膽量3 領導1 邏輯2 觀察5 團隊3 歡樂2
+    condition: (scores, top2) => top2[0] === 'observation',
+    bestMatch: 'brain',
+    bestMatchName: '高冷通靈軍師',
+    enemy: 'actor',
+    enemyName: '入戲太深影帝',
+    gradient: 'from-emerald-500 to-teal-600'
+  },
+  {
+    id: 'brain',
+    name: '高冷通靈軍師',
+    emoji: '🧠',
+    description: '不用試了，密碼是 3141。你最討厭「暴力解」，認為那是對智商的侮辱。快樂來自於秒解難題的高光時刻。',
+    // 邏輯最高
+    // 雷達：膽量3 領導2 邏輯5 觀察2 團隊2 歡樂1
+    condition: (scores, top2) => top2[0] === 'logic',
+    bestMatch: 'scanner',
+    bestMatchName: '地毯式搜索掃描機',
+    enemy: 'hamster',
+    enemyName: '瑟瑟發抖倉鼠',
+    gradient: 'from-blue-500 to-indigo-600'
+  },
+  {
+    id: 'actor',
+    name: '入戲太深影帝',
+    emoji: '🎭',
+    description: '我覺得這個爸爸其實很愛他女兒...（哽咽）你是唯一會在密室裡被感動哭的人，堅持要大家聽你講故事。',
+    // 觀察高（閱讀） + 團隊高（氣氛組）
+    // 雷達：膽量2 領導2 邏輯3 觀察4 團隊4 歡樂3
+    condition: (scores, top2) => (top2.includes('observation') && top2.includes('teamwork')) || top2[0] === 'teamwork',
+    bestMatch: 'tank',
+    bestMatchName: '無情肉盾坦克',
+    enemy: 'brain',
+    enemyName: '高冷通靈軍師',
+    gradient: 'from-purple-500 to-pink-500'
+  },
+  {
+    id: 'hamster_humor',
     name: '瑟瑟發抖倉鼠',
     emoji: '🐹',
-    description: '我要回家...你們去就好，我在這裡等...你為陰森密室帶來滿滿情緒價值！',
-    // 歡樂最高
+    description: '我要回家...你們去就好，我在這裡等...你是鴕鳥心態代表，全程緊抓坦克衣服，為 NPC 帶來滿滿業績。',
+    // 歡樂最高（但膽量不是最低時的備選）
     condition: (scores, top2) => top2[0] === 'humor',
     bestMatch: 'tank',
-    bestMatchName: '鋼鐵坦克',
-    enemy: 'brute',
-    enemyName: '暴力解鎖王',
+    bestMatchName: '無情肉盾坦克',
+    enemy: 'brain',
+    enemyName: '高冷通靈軍師',
     gradient: 'from-pink-400 to-orange-400'
   }
 ];
