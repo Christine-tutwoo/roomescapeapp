@@ -146,7 +146,6 @@ const QUIZ_CHARACTERS = [
     emoji: '🛡️',
     slogan: '別怕，躲我後面！',
     description: '你是團隊的安全感來源！當燈光熄滅、鬼怪衝出來時，你總是擋在最前面。你未必最會解數學題，但你的決策力與勇氣是團隊能繼續前進的關鍵。',
-    tags: ['#人肉盾牌', '#開路先鋒', '#哪次不衝'],
     bestMatch: 'hamster',
     bestMatchName: '極致倉鼠',
     enemy: 'brain',
@@ -160,7 +159,6 @@ const QUIZ_CHARACTERS = [
     emoji: '🧠',
     slogan: '安靜！給我三秒鐘。',
     description: '你是密室裡的 CPU！面對滿牆的數字與符號，別人看到的是亂碼，你看到的是通關密碼。卡關時大家都會用崇拜的眼神看向你，你是通關的希望。',
-    tags: ['#邏輯鬼才', '#劇情整理師', '#定海神針'],
     bestMatch: 'sherlock',
     bestMatchName: '鷹眼搜查官',
     enemy: 'tank',
@@ -174,7 +172,6 @@ const QUIZ_CHARACTERS = [
     emoji: '🔍',
     slogan: '這裡怎麼有一把鑰匙？',
     description: '如果沒有你，大腦再強也沒用！因為線索都是你找到的。你擁有「翻箱倒櫃」的執照，總能發現地毯下、夾層裡的關鍵道具。你是最被低估的關鍵人物。',
-    tags: ['#地毯式搜索', '#細節強迫症', '#神輔助'],
     bestMatch: 'brain',
     bestMatchName: '解謎大腦',
     enemy: 'hamster',
@@ -188,7 +185,6 @@ const QUIZ_CHARACTERS = [
     emoji: '🐹',
     slogan: '啊啊啊啊啊啊啊！！！',
     description: '你的尖叫聲比鬼還恐怖！你把密室玩成了極限體能王，整場都在深蹲與折返跑。雖然你解謎貢獻度可能不高，但你提供了無可取代的「情緒價值」，讓 NPC 很有成就感。',
-    tags: ['#人體尖叫雞', '#路障製造機', '#死道友不死貧道'],
     bestMatch: 'tank',
     bestMatchName: '破陣坦克',
     enemy: 'sherlock',
@@ -202,7 +198,6 @@ const QUIZ_CHARACTERS = [
     emoji: '🧸',
     slogan: '我是誰？我在哪？隊友真棒。',
     description: '你是密室裡的和平大使與氣氛組。當大家為了謎題焦頭爛額時，你總是用一種超然的態度面對。你負責黏在強者後面，負責可愛，也負責在最後合照時站 C 位。',
-    tags: ['#亂流製造者', '#中二病', '#負責可愛'],
     bestMatch: 'ace',
     bestMatchName: '六邊形戰士',
     enemy: 'brain',
@@ -216,7 +211,6 @@ const QUIZ_CHARACTERS = [
     emoji: '🌟',
     slogan: '你們退後，我來處理。',
     description: '你是密室裡的傳說生物！既能當坦克擋鬼，又能解開最難的邏輯題，還能找到藏在天花板的鑰匙。你一個人就抵過一支軍隊，請珍惜這種稀有的天賦！',
-    tags: ['#全能大腿', '#Carry全場', '#通靈王'],
     bestMatch: 'mascot',
     bestMatchName: '佛系吉祥物',
     enemy: 'ace',
@@ -428,6 +422,24 @@ const formatDate = (date) => {
   const month = (d.getMonth() + 1).toString().padStart(2, '0');
   const day = d.getDate().toString().padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+const getEventDateTime = (event) => {
+  if (!event?.date) return null;
+  const rawTime = (event.time || '00:00').trim();
+  const match = rawTime.match(/^(\d{1,2}):(\d{2})/);
+  const hh = match ? match[1].padStart(2, '0') : '00';
+  const mm = match ? match[2] : '00';
+  const dateTime = new Date(`${event.date}T${hh}:${mm}`);
+  if (!Number.isNaN(dateTime.getTime())) return dateTime;
+  const dateOnly = new Date(event.date);
+  return Number.isNaN(dateOnly.getTime()) ? null : dateOnly;
+};
+
+const isEventPast = (event) => {
+  const dateTime = getEventDateTime(event);
+  if (!dateTime) return false;
+  return dateTime.getTime() < Date.now();
 };
 
 const isWebView = () => {
@@ -680,15 +692,7 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
 
     let afterDescY = descStart + (descLines.length ? (descLines.length - 1) * LINE_HEIGHT : 0);
 
-    if (Array.isArray(result.character?.tags) && result.character.tags.length) {
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '24px sans-serif';
-      const tagLines = wrapLines(result.character.tags.join('  '), CARD_TEXT_WIDTH);
-      const tagsStartY = Math.max(afterDescY + LINE_HEIGHT, CARD_BOTTOM - 70);
-      tagLines.forEach((line, idx) => {
-        ctx.fillText(line, width / 2, tagsStartY + idx * 32);
-      });
-    }
+    // 標籤已移除，預留空間以保持版面
     
     // 屬性面板標題
     ctx.fillStyle = '#ffffff';
@@ -1219,8 +1223,7 @@ useEffect(() => {
 
   const getFilteredEvents = () => {
     const now = new Date();
-     // 設定時間為 00:00:00 以便只比較日期部分
-     now.setHours(0, 0, 0, 0);
+    now.setHours(0, 0, 0, 0);
     const todayStr = formatDate(now);
     
      let filtered = events;
@@ -1238,12 +1241,8 @@ useEffect(() => {
         filtered = filtered.filter(ev => ev.hostUid === filterHostUid);
     }
 
-     // 1. 基礎日期過濾：只顯示今天及未來的團
-     filtered = filtered.filter(ev => {
-       const eventDate = new Date(ev.date);
-       eventDate.setHours(0, 0, 0, 0); // 確保只比較日期
-       return eventDate >= now;
-     });
+    // 1. 基礎日期過濾：只顯示尚未開始的團（含當日但未到時間）
+    filtered = filtered.filter(ev => !isEventPast(ev));
 
     // 2. 篩選器
     if (filterCategory !== 'All') {
@@ -4240,6 +4239,7 @@ ${url}
               ) : (
                 events.filter(e => myEvents.includes(e.id) || myWaitlists.includes(e.id)).map(ev => {
                   const isWaitlisted = myWaitlists.includes(ev.id);
+                  const isPastEvent = isEventPast(ev);
                   const guestNotices = (ev.guestRemovalNotices || []).filter(n => n.ownerUid === user.uid);
                   const locationLink = getMapsUrl(ev.location);
                   const isHost = ev.hostUid === user.uid;
@@ -4251,7 +4251,11 @@ ${url}
                       <div className="flex justify-between items-start mb-4">
                         <div>
                           <div className="flex items-center gap-2 mb-2">
-                            {isWaitlisted ? (
+                            {isPastEvent ? (
+                              <span className="text-xs font-bold bg-slate-500/10 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-500/20 flex items-center">
+                                <Clock size={12} className="mr-1.5" /> 已結團
+                              </span>
+                            ) : isWaitlisted ? (
                               <span className="text-xs font-bold bg-yellow-500/10 text-yellow-400 px-2.5 py-1 rounded-lg border border-yellow-500/20 flex items-center">
                                 <Hourglass size={12} className="mr-1.5"/> 候補排隊中
                               </span>
@@ -4634,7 +4638,7 @@ ${url}
                           <div className="flex items-center gap-2 mb-2 flex-wrap">
                             {isPast ? (
                               <span className="text-xs font-bold bg-slate-500/10 text-slate-400 px-2.5 py-1 rounded-lg border border-slate-500/20">
-                                已結束
+                                已結團
                               </span>
                             ) : eventIsFull ? (
                               <span className="text-xs font-bold bg-red-500/10 text-red-400 px-2.5 py-1 rounded-lg border border-red-500/20">
