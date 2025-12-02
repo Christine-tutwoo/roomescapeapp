@@ -604,11 +604,17 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     ctx.font = 'bold 64px sans-serif';
     ctx.fillText(result.character.name, width / 2, 470);
     
-    // 角色描述
+    // 角色描述（分段顯示）
     ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
     ctx.font = 'italic 28px sans-serif';
-    const desc = `「${result.character.description}」`;
-    ctx.fillText(desc, width / 2, 540);
+    ctx.textAlign = 'center';
+    const descParts = result.character.description.split('。').filter(s => s.trim());
+    let descY = 520;
+    descParts.forEach((part, index) => {
+      const text = index === 0 ? `「${part.trim()}。` : (index === descParts.length - 1 ? `${part.trim()}」` : `${part.trim()}。`);
+      ctx.fillText(text, width / 2, descY);
+      descY += 40;
+    });
     
     // 屬性面板標題
     ctx.fillStyle = '#ffffff';
@@ -618,7 +624,7 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     // 六邊形雷達圖
     const centerX = width / 2;
     const centerY = 920;
-    const maxRadius = 200;
+    const maxRadius = 250; // 增大六邊形
     
     // 背景六邊形
     for (let scale of [1, 0.75, 0.5, 0.25]) {
@@ -686,41 +692,17 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
       ctx.fillText(attr.name, centerX + labelR * Math.cos(angle), centerY + labelR * Math.sin(angle) + 10);
     });
     
-    // 分數列表
-    const scoreY = 1200;
-    const scoreBoxWidth = 160;
-    const scoreBoxHeight = 80;
-    const scoreGap = 20;
-    const startX = (width - (3 * scoreBoxWidth + 2 * scoreGap)) / 2;
-    
-    QUIZ_ATTRIBUTES.forEach((attr, i) => {
-      const row = Math.floor(i / 3);
-      const col = i % 3;
-      const x = startX + col * (scoreBoxWidth + scoreGap);
-      const y = scoreY + row * (scoreBoxHeight + 15);
-      
-      roundRect(x, y, scoreBoxWidth, scoreBoxHeight, 12);
-      ctx.fillStyle = attr.color + '33';
-      ctx.fill();
-      
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '20px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(attr.name, x + scoreBoxWidth / 2, y + 30);
-      
-      ctx.fillStyle = attr.color;
-      ctx.font = 'bold 32px sans-serif';
-      ctx.fillText(result.scores[attr.key] || 0, x + scoreBoxWidth / 2, y + 65);
-    });
-    
-    // 相生相剋標題
+    // 相生相剋標題（移除分數列表後，位置提前）
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 36px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('⚔️ 相生相剋', width / 2, 1450);
+    ctx.fillText('⚔️ 相生相剋', width / 2, 1200);
     
-    // 最佳隊友
-    roundRect(80, 1490, (width - 200) / 2, 120, 20);
+    // 最佳隊友（位置提前）
+    const boxY = 1240;
+    const boxWidth = (width - 200) / 2;
+    const boxHeight = 120;
+    roundRect(80, boxY, boxWidth, boxHeight, 20);
     ctx.fillStyle = 'rgba(16, 185, 129, 0.15)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(16, 185, 129, 0.5)';
@@ -729,13 +711,14 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     
     ctx.fillStyle = '#34d399';
     ctx.font = '24px sans-serif';
-    ctx.fillText('最佳隊友', 80 + (width - 200) / 4, 1535);
+    ctx.textAlign = 'center';
+    ctx.fillText('最佳隊友', 80 + boxWidth / 2, boxY + 35);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 36px sans-serif';
-    ctx.fillText(result.character.bestMatchName, 80 + (width - 200) / 4, 1585);
+    ctx.fillText(result.character.bestMatchName, 80 + boxWidth / 2, boxY + 85);
     
-    // 天敵
-    roundRect(width / 2 + 20, 1490, (width - 200) / 2, 120, 20);
+    // 天敵（位置提前）
+    roundRect(width / 2 + 20, boxY, boxWidth, boxHeight, 20);
     ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
@@ -744,23 +727,23 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     
     ctx.fillStyle = '#f87171';
     ctx.font = '24px sans-serif';
-    ctx.fillText('天敵', width / 2 + 20 + (width - 200) / 4, 1535);
+    ctx.fillText('天敵', width / 2 + 20 + boxWidth / 2, boxY + 35);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 36px sans-serif';
-    ctx.fillText(result.character.enemyName, width / 2 + 20 + (width - 200) / 4, 1585);
+    ctx.fillText(result.character.enemyName, width / 2 + 20 + boxWidth / 2, boxY + 85);
     
-    // 測驗連結
+    // 測驗連結（位置提前）
     ctx.fillStyle = '#94a3b8';
     ctx.font = '24px sans-serif';
-    ctx.fillText('快來測測你是什麼類型的密室玩家！', width / 2, 1700);
+    ctx.fillText('快來測測你是什麼類型的密室玩家！', width / 2, boxY + boxHeight + 60);
     ctx.fillStyle = '#c084fc';
     ctx.font = '22px sans-serif';
-    ctx.fillText(window.location.origin + '?tab=quiz', width / 2, 1740);
+    ctx.fillText(window.location.origin + '?tab=quiz', width / 2, boxY + boxHeight + 100);
     
-    // 水印
+    // 水印（位置提前）
     ctx.fillStyle = '#64748b';
     ctx.font = '28px sans-serif';
-    ctx.fillText('made by IG:hu._escaperoom', width / 2, 1850);
+    ctx.fillText('made by IG:hu._escaperoom', width / 2, boxY + boxHeight + 180);
     
     return canvas;
   };
@@ -4857,9 +4840,15 @@ ${url}
                       <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>{quizResult.character.emoji}</div>
                       <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.75rem', marginBottom: '0.25rem' }}>{quizNickname} 的密室人格是</div>
                       <h2 style={{ fontSize: '1.5rem', fontWeight: 900, color: '#ffffff', marginBottom: '0.5rem' }}>{quizResult.character.name}</h2>
-                      <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.75rem', lineHeight: 1.6, fontStyle: 'italic' }}>
-                        「{quizResult.character.description}」
-                      </p>
+                      <div style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.75rem', lineHeight: 1.6, fontStyle: 'italic' }}>
+                        「{quizResult.character.description.split('。').filter(s => s.trim()).map((part, i, arr) => (
+                          <React.Fragment key={i}>
+                            {part.trim()}
+                            {i < arr.length - 1 ? '。' : ''}
+                            {i < arr.length - 1 && <br />}
+                          </React.Fragment>
+                        ))}」
+                      </div>
                     </div>
                   </div>
 
@@ -4869,14 +4858,14 @@ ${url}
                     
                     {/* SVG 雷達圖 */}
                     <div className="flex justify-center mb-3">
-                      <svg viewBox="0 0 200 200" className="w-48 h-48">
+                      <svg viewBox="0 0 200 200" className="w-64 h-64">
                         {/* 背景六邊形網格 */}
                         {[1, 0.75, 0.5, 0.25].map((scale, i) => (
                           <polygon
                             key={i}
                             points={QUIZ_ATTRIBUTES.map((_, idx) => {
                               const angle = (idx * 60 - 90) * (Math.PI / 180);
-                              const r = 80 * scale;
+                              const r = 90 * scale; // 增大六邊形
                               return `${100 + r * Math.cos(angle)},${100 + r * Math.sin(angle)}`;
                             }).join(' ')}
                             fill="none"
@@ -4907,7 +4896,7 @@ ${url}
                             const angle = (idx * 60 - 90) * (Math.PI / 180);
                             const maxScore = 10; // 調整為更合理的最大值
                             const score = quizResult.scores[attr.key] || 0;
-                            const r = Math.min((score / maxScore) * 80, 80); // 確保不超過外框
+                            const r = Math.min((score / maxScore) * 90, 90); // 增大並確保不超過外框
                             return `${100 + r * Math.cos(angle)},${100 + r * Math.sin(angle)}`;
                           }).join(' ')}
                           fill="rgba(168, 85, 247, 0.3)"
@@ -4920,7 +4909,7 @@ ${url}
                           const angle = (idx * 60 - 90) * (Math.PI / 180);
                           const maxScore = 10; // 調整為更合理的最大值
                           const score = quizResult.scores[attr.key] || 0;
-                          const r = Math.min((score / maxScore) * 80, 80); // 確保不超過外框
+                          const r = Math.min((score / maxScore) * 90, 90); // 增大並確保不超過外框
                           return (
                             <circle
                               key={idx}
@@ -4952,26 +4941,6 @@ ${url}
                           );
                         })}
                       </svg>
-                    </div>
-
-                    {/* 分數列表 */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.375rem' }}>
-                      {QUIZ_ATTRIBUTES.map(attr => (
-                        <div 
-                          key={attr.key}
-                          style={{ 
-                            textAlign: 'center', 
-                            padding: '0.375rem', 
-                            borderRadius: '0.5rem',
-                            backgroundColor: attr.color + '33'
-                          }}
-                        >
-                          <div style={{ fontSize: '10px', color: '#94a3b8' }}>{attr.name}</div>
-                          <div style={{ fontWeight: 700, fontSize: '0.875rem', color: attr.color }}>
-                            {quizResult.scores[attr.key] || 0}
-                          </div>
-                        </div>
-                      ))}
                     </div>
                   </div>
 
