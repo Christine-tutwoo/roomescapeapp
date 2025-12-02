@@ -539,6 +539,12 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     ctx.arc(width * 0.2, height * 0.9, 150, 0, Math.PI * 2);
     ctx.fill();
     
+    // 判斷資料有效
+    if (!result || !result.character) {
+      console.error('generateQuizResultImage: invalid result payload', result);
+      return null;
+    }
+    
     // 標題
     ctx.fillStyle = '#c084fc';
     ctx.font = 'bold 36px sans-serif';
@@ -547,19 +553,16 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     
     // 角色漸層背景
     const characterColors = {
-      hamster: ['#f472b6', '#fb923c'],      // 粉橘 - 倉鼠
-      hamster_fun: ['#f472b6', '#fb923c'],  // 粉橘 - 倉鼠(歡樂型)
-      brute: ['#f97316', '#ef4444'],        // 橘紅 - 暴力解鎖王
-      tank: ['#475569', '#3f3f46'],         // 深灰 - 坦克
-      tank_solo: ['#475569', '#3f3f46'],    // 深灰 - 坦克(單獨)
-      actor: ['#a855f7', '#ec4899'],        // 紫粉 - 影帝
-      actor_solo: ['#a855f7', '#ec4899'],   // 紫粉 - 影帝(單獨)
-      brain: ['#3b82f6', '#4f46e5'],        // 藍靛 - 軍師
-      scanner: ['#10b981', '#0d9488'],      // 綠青 - 掃描機
-      leader: ['#f59e0b', '#ea580c']        // 黃橘 - 領導型坦克
+      tank: ['#475569', '#1f2937'],
+      brain: ['#3b82f6', '#4338ca'],
+      sherlock: ['#10b981', '#0d9488'],
+      hamster: ['#f472b6', '#fb923c'],
+      mascot: ['#c084fc', '#d946ef'],
+      ace: ['#facc15', '#d97706']
     };
     
-    const colors = characterColors[result.character.id] || characterColors.balanced;
+    const currentCharacterId = result.character?.id || 'mascot';
+    const colors = characterColors[currentCharacterId] || ['#a855f7', '#ec4899'];
     const cardGradient = ctx.createLinearGradient(100, 180, width - 100, 580);
     cardGradient.addColorStop(0, colors[0]);
     cardGradient.addColorStop(1, colors[1]);
@@ -592,24 +595,35 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     // Emoji
     ctx.font = '120px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(result.character.emoji, width / 2, 320);
+    ctx.fillText(result.character?.emoji || '🎮', width / 2, 320);
     
-    // 暱稱
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    // 標題與暱稱
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.font = '24px sans-serif';
+    ctx.fillText(result.character?.title || 'ESCAPER', width / 2, 360);
+    
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
     ctx.font = '32px sans-serif';
-    ctx.fillText(`${nickname} 的密室人格是`, width / 2, 390);
+    ctx.fillText(`${nickname} 的密室人格是`, width / 2, 410);
     
     // 角色名稱
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 64px sans-serif';
-    ctx.fillText(result.character.name, width / 2, 470);
+    ctx.fillText(result.character?.name || '未知角色', width / 2, 470);
+    
+    // 角色標語
+    if (result.character?.slogan) {
+      ctx.fillStyle = '#fde047';
+      ctx.font = 'bold 32px sans-serif';
+      ctx.fillText(result.character.slogan, width / 2, 520);
+    }
     
     // 角色描述（分段顯示）
     ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
     ctx.font = 'italic 28px sans-serif';
     ctx.textAlign = 'center';
-    const descParts = result.character.description.split('。').filter(s => s.trim());
-    let descY = 520;
+    const descParts = (result.character?.description || '').split('。').filter(s => s.trim());
+    let descY = result.character?.slogan ? 560 : 540;
     descParts.forEach((part, index) => {
       const text = index === 0 ? `「${part.trim()}。` : (index === descParts.length - 1 ? `${part.trim()}」` : `${part.trim()}。`);
       ctx.fillText(text, width / 2, descY);
@@ -715,7 +729,7 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     ctx.fillText('最佳隊友', 80 + boxWidth / 2, boxY + 35);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 36px sans-serif';
-    ctx.fillText(result.character.bestMatchName, 80 + boxWidth / 2, boxY + 85);
+    ctx.fillText(result.character?.bestMatchName || '未知', 80 + boxWidth / 2, boxY + 85);
     
     // 天敵（位置提前）
     roundRect(width / 2 + 20, boxY, boxWidth, boxHeight, 20);
@@ -730,7 +744,7 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     ctx.fillText('天敵', width / 2 + 20 + boxWidth / 2, boxY + 35);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 36px sans-serif';
-    ctx.fillText(result.character.enemyName, width / 2 + 20 + boxWidth / 2, boxY + 85);
+    ctx.fillText(result.character?.enemyName || '未知', width / 2 + 20 + boxWidth / 2, boxY + 85);
     
     // 測驗連結（位置提前）
     ctx.fillStyle = '#94a3b8';
