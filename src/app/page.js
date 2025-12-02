@@ -302,6 +302,15 @@ const INITIAL_PROMOTIONS = [
     period: "長期優惠",
     color: "from-yellow-600 to-amber-600",
     icon: <Users className="text-white" />
+  },
+  {
+    id: 8,
+    studio: "月蝕謎願-室在哈邏密室逃脫工作室",
+    title: "百元折價券 (下次使用)",
+    content: "看人頭數給予一百元折價卷（下次使用）。",
+    period: "長期優惠",
+    color: "from-indigo-600 to-purple-600",
+    icon: <Ticket className="text-white" />
   }
 ];
 const VISITOR_USER = {
@@ -449,6 +458,7 @@ const [user, setUser] = useState(VISITOR_USER);
   const [filterPrice, setFilterPrice] = useState('All'); // 新增費用篩選
   const [filterSlots, setFilterSlots] = useState('All'); // 新增缺額篩選
   const [filterEventId, setFilterEventId] = useState(null);
+  const [sharedEvent, setSharedEvent] = useState(null); // 用於儲存分享連結的活動
   const [filterWishId, setFilterWishId] = useState(null); // New state for wish filtering
   const [wishMembersModal, setWishMembersModal] = useState({ show: false, wishId: null, members: [] });
   const [sharePrompt, setSharePrompt] = useState({ show: false, eventId: null, eventData: null });
@@ -877,6 +887,14 @@ const handleIdentityGroupConfirm = () => {
         } else if (sharedEventId) {
             setFilterEventId(sharedEventId);
             setActiveTab('lobby');
+            // 直接從 Firestore 載入該活動，確保分享連結可用
+            getDoc(doc(db, "events", sharedEventId)).then(eventDoc => {
+                if (eventDoc.exists()) {
+                    setSharedEvent({ id: eventDoc.id, ...eventDoc.data() });
+                }
+            }).catch(err => {
+                console.error("Error loading shared event:", err);
+            });
         } else if (sharedWishId) {
             setFilterWishId(sharedWishId);
             setActiveTab('wishes');
@@ -1153,9 +1171,13 @@ useEffect(() => {
     
      let filtered = events;
  
-     // 0. 如果有指定 Event ID (分享連結)，只顯示該活動
+     // 0. 如果有指定 Event ID (分享連結)，優先顯示 sharedEvent，否則從列表中找
      if (filterEventId) {
-         return filtered.filter(ev => ev.id === filterEventId);
+         if (sharedEvent && sharedEvent.id === filterEventId) {
+             return [sharedEvent];
+         }
+         const found = filtered.find(ev => ev.id === filterEventId);
+         return found ? [found] : [];
      }
 
     if (filterHostUid) {
@@ -1249,8 +1271,8 @@ useEffect(() => {
     
     let text = url;
     if (event) {
-        const actualParticipants = event.currentSlots || ((event.participants?.length || 0) + (event.guests?.length || 0));
-        const currentCount = actualParticipants + getBuiltInCount(event);
+        // 使用 getEffectiveCurrentSlots 來正確計算包含攜伴的總人數
+        const currentCount = getEffectiveCurrentSlots(event);
         
         text = `
 主題：${event.title}
@@ -2728,6 +2750,9 @@ ${url}
         setFilterMonth('All');
         setFilterDateType('All');
         setSelectedDateFilter(null);
+        // 重置分頁狀態，確保新開的團能顯示在第一頁
+        setLastVisible(null);
+        setHasMore(true);
         // Refresh events to show the changes
         fetchEvents(false);
       }
@@ -2981,6 +3006,7 @@ ${url}
                         <button 
                             onClick={() => {
                                 setFilterEventId(null);
+                                setSharedEvent(null);
                                 // 清除 URL 中的 query param
                                 const url = new URL(window.location);
                                 url.searchParams.delete('eventId');
@@ -3910,7 +3936,7 @@ ${url}
                       type="number" 
                       required 
                       min="2" 
-                      max="20"
+                      max="40"
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
                       value={formData.totalSlots} 
                       onChange={e => setFormData({...formData, totalSlots: e.target.value})}
@@ -3925,7 +3951,7 @@ ${url}
                     <input
                       type="number"
                       min="0"
-                      max="20"
+                      max="40"
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
                       value={formData.builtInPlayers || ''}
                       onChange={e => setFormData({...formData, builtInPlayers: e.target.value})}
@@ -3963,7 +3989,7 @@ ${url}
                         type="number" 
                         required 
                         min="2" 
-                        max="20"
+                        max="40"
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-3 text-white focus:border-emerald-500 outline-none"
                         value={formData.minPlayers} 
                         onChange={e => setFormData({...formData, minPlayers: e.target.value})}
