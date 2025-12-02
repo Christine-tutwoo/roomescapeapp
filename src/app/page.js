@@ -672,11 +672,11 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     
     // 數據多邊形
     ctx.beginPath();
-    const maxScore = 20;
+    const maxScore = 10; // 調整為更合理的最大值
     QUIZ_ATTRIBUTES.forEach((attr, i) => {
       const angle = (i * 60 - 90) * (Math.PI / 180);
       const score = result.scores[attr.key] || 0;
-      const r = (score / maxScore) * maxRadius;
+      const r = Math.min((score / maxScore) * maxRadius, maxRadius); // 確保不超過外框
       const x = centerX + r * Math.cos(angle);
       const y = centerY + r * Math.sin(angle);
       if (i === 0) ctx.moveTo(x, y);
@@ -693,7 +693,7 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     QUIZ_ATTRIBUTES.forEach((attr, i) => {
       const angle = (i * 60 - 90) * (Math.PI / 180);
       const score = result.scores[attr.key] || 0;
-      const r = (score / maxScore) * maxRadius;
+      const r = Math.min((score / maxScore) * maxRadius, maxRadius); // 確保不超過外框
       
       // 數據點
       ctx.beginPath();
@@ -4912,9 +4912,9 @@ ${url}
                         <polygon
                           points={QUIZ_ATTRIBUTES.map((attr, idx) => {
                             const angle = (idx * 60 - 90) * (Math.PI / 180);
-                            const maxScore = 20;
+                            const maxScore = 10; // 調整為更合理的最大值
                             const score = quizResult.scores[attr.key] || 0;
-                            const r = (score / maxScore) * 80;
+                            const r = Math.min((score / maxScore) * 80, 80); // 確保不超過外框
                             return `${100 + r * Math.cos(angle)},${100 + r * Math.sin(angle)}`;
                           }).join(' ')}
                           fill="rgba(168, 85, 247, 0.3)"
@@ -4925,9 +4925,9 @@ ${url}
                         {/* 數據點 */}
                         {QUIZ_ATTRIBUTES.map((attr, idx) => {
                           const angle = (idx * 60 - 90) * (Math.PI / 180);
-                          const maxScore = 20;
+                          const maxScore = 10; // 調整為更合理的最大值
                           const score = quizResult.scores[attr.key] || 0;
-                          const r = (score / maxScore) * 80;
+                          const r = Math.min((score / maxScore) * 80, 80); // 確保不超過外框
                           return (
                             <circle
                               key={idx}

@@ -33,7 +33,7 @@ export default function PrivacyPolicy() {
 
         {/* Content */}
         <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800">
-          <p className="text-slate-500 text-xs mb-6">最後更新日期：2025/01/01</p>
+          <p className="text-slate-500 text-xs mb-6">最後更新日期：2025/12/02</p>
 
           <div className="space-y-8 text-sm text-slate-300 leading-relaxed">
             
@@ -145,17 +145,6 @@ export default function PrivacyPolicy() {
             <section>
               <h2 className="text-lg text-emerald-400 font-bold mb-3 flex items-center gap-2">
                 <span className="w-6 h-6 bg-emerald-500/20 rounded-full flex items-center justify-center text-xs">7</span>
-                兒童隱私
-              </h2>
-              <p className="text-slate-400">
-                本服務不針對 13 歲以下兒童提供服務。如果我們發現不慎蒐集了兒童的個人資料，
-                將會立即刪除相關資料。
-              </p>
-            </section>
-
-            <section>
-              <h2 className="text-lg text-emerald-400 font-bold mb-3 flex items-center gap-2">
-                <span className="w-6 h-6 bg-emerald-500/20 rounded-full flex items-center justify-center text-xs">8</span>
                 隱私權政策的修訂
               </h2>
               <p className="text-slate-400">
@@ -166,7 +155,7 @@ export default function PrivacyPolicy() {
 
             <section>
               <h2 className="text-lg text-emerald-400 font-bold mb-3 flex items-center gap-2">
-                <span className="w-6 h-6 bg-emerald-500/20 rounded-full flex items-center justify-center text-xs">9</span>
+                <span className="w-6 h-6 bg-emerald-500/20 rounded-full flex items-center justify-center text-xs">8</span>
                 聯絡我們
               </h2>
               <p className="text-slate-400 mb-4">
