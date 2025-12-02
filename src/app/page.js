@@ -5268,6 +5268,24 @@ made by IG:hu._escaperoom`;
                     </div>
                  </div>
 
+                 <div className="h-px bg-slate-800 w-full" />
+                 
+                 {/* Legal Links */}
+                 <div className="flex justify-center gap-6">
+                    <a
+                        href="/terms"
+                        className="text-emerald-400 hover:text-emerald-300 text-sm font-medium underline underline-offset-4"
+                    >
+                        使用條款
+                    </a>
+                    <a
+                        href="/privacy"
+                        className="text-emerald-400 hover:text-emerald-300 text-sm font-medium underline underline-offset-4"
+                    >
+                        隱私權政策
+                    </a>
+                 </div>
+
             </div>
 
             <div className="text-center pb-8">
@@ -5277,6 +5295,7 @@ made by IG:hu._escaperoom`;
             </div>
           </div>
         )}
+
       </main>
 
       {/* Guest Join Modal */}
