@@ -563,7 +563,46 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     
     const currentCharacterId = result.character?.id || 'mascot';
     const colors = characterColors[currentCharacterId] || ['#a855f7', '#ec4899'];
-    const cardGradient = ctx.createLinearGradient(100, 180, width - 100, 580);
+
+    const CARD_Y = 150;
+    const CARD_HEIGHT = 520;
+    const CARD_BOTTOM = CARD_Y + CARD_HEIGHT;
+    const PANEL_TITLE_Y = CARD_BOTTOM + 120;
+    const RADAR_CENTER_Y = PANEL_TITLE_Y + 360;
+    const RADAR_RADIUS = 230;
+    const MATCH_TITLE_Y = RADAR_CENTER_Y + RADAR_RADIUS + 150;
+    const MATCH_BOX_Y = MATCH_TITLE_Y + 50;
+    const MATCH_BOX_HEIGHT = 130;
+    const LINK_Y = MATCH_BOX_Y + MATCH_BOX_HEIGHT + 80;
+    const WATERMARK_Y = LINK_Y + 80;
+
+    const CARD_TEXT_WIDTH = width - 240;
+    const LINE_HEIGHT = 42;
+
+    const wrapLines = (text, maxWidth) => {
+      if (!text) return [];
+      const normalized = text.replace(/\r/g, '');
+      const lines = [];
+      let current = '';
+      for (const char of normalized) {
+        if (char === '\n') {
+          if (current) lines.push(current);
+          current = '';
+          continue;
+        }
+        const testLine = current + char;
+        if (ctx.measureText(testLine).width > maxWidth && current) {
+          lines.push(current);
+          current = char;
+        } else {
+          current = testLine;
+        }
+      }
+      if (current) lines.push(current);
+      return lines;
+    };
+
+    const cardGradient = ctx.createLinearGradient(80, CARD_Y, width - 80, CARD_BOTTOM);
     cardGradient.addColorStop(0, colors[0]);
     cardGradient.addColorStop(1, colors[1]);
     
@@ -583,62 +622,75 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     };
     
     // 角色卡片
-    roundRect(60, 180, width - 120, 400, 40);
+    roundRect(60, CARD_Y, width - 120, CARD_HEIGHT, 40);
     ctx.fillStyle = cardGradient;
     ctx.fill();
     
     // 半透明覆蓋
-    roundRect(60, 180, width - 120, 400, 40);
+    roundRect(60, CARD_Y, width - 120, CARD_HEIGHT, 40);
     ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
     ctx.fill();
     
     // Emoji
     ctx.font = '120px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(result.character?.emoji || '🎮', width / 2, 320);
+    ctx.fillText(result.character?.emoji || '🎮', width / 2, CARD_Y + 140);
     
     // 標題與暱稱
     ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
     ctx.font = '24px sans-serif';
-    ctx.fillText(result.character?.title || 'ESCAPER', width / 2, 360);
+    ctx.fillText(result.character?.title || 'ESCAPER', width / 2, CARD_Y + 200);
     
     ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
     ctx.font = '32px sans-serif';
-    ctx.fillText(`${nickname} 的密室人格是`, width / 2, 410);
+    ctx.fillText(`${nickname} 的密室人格是`, width / 2, CARD_Y + 250);
     
     // 角色名稱
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 64px sans-serif';
-    ctx.fillText(result.character?.name || '未知角色', width / 2, 470);
+    ctx.fillText(result.character?.name || '未知角色', width / 2, CARD_Y + 315);
     
     // 角色標語
     if (result.character?.slogan) {
       ctx.fillStyle = '#fde047';
       ctx.font = 'bold 32px sans-serif';
-      ctx.fillText(result.character.slogan, width / 2, 520);
+      ctx.fillText(result.character.slogan, width / 2, CARD_Y + 360);
     }
     
     // 角色描述（分段顯示）
     ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
     ctx.font = 'italic 28px sans-serif';
     ctx.textAlign = 'center';
-    const descParts = (result.character?.description || '').split('。').filter(s => s.trim());
-    let descY = result.character?.slogan ? 560 : 540;
-    descParts.forEach((part, index) => {
-      const text = index === 0 ? `「${part.trim()}。` : (index === descParts.length - 1 ? `${part.trim()}」` : `${part.trim()}。`);
-      ctx.fillText(text, width / 2, descY);
-      descY += 40;
+    const descriptionText = result.character?.description
+      ? `「${result.character.description}」`
+      : '';
+    const descLines = wrapLines(descriptionText, CARD_TEXT_WIDTH);
+    let descStart = result.character?.slogan ? CARD_Y + 410 : CARD_Y + 380;
+    descLines.forEach((line, idx) => {
+      ctx.fillText(line, width / 2, descStart + idx * LINE_HEIGHT);
     });
+
+    let afterDescY = descStart + (descLines.length ? (descLines.length - 1) * LINE_HEIGHT : 0);
+
+    if (Array.isArray(result.character?.tags) && result.character.tags.length) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '24px sans-serif';
+      const tagLines = wrapLines(result.character.tags.join('  '), CARD_TEXT_WIDTH);
+      const tagsStartY = Math.max(afterDescY + LINE_HEIGHT, CARD_BOTTOM - 70);
+      tagLines.forEach((line, idx) => {
+        ctx.fillText(line, width / 2, tagsStartY + idx * 32);
+      });
+    }
     
     // 屬性面板標題
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 36px sans-serif';
-    ctx.fillText('🎯 屬性面板', width / 2, 660);
+    ctx.fillText('🎯 屬性面板', width / 2, PANEL_TITLE_Y);
     
     // 六邊形雷達圖
     const centerX = width / 2;
-    const centerY = 920;
-    const maxRadius = 250; // 增大六邊形
+    const centerY = RADAR_CENTER_Y;
+    const maxRadius = RADAR_RADIUS; // 增大六邊形
     
     // 背景六邊形
     for (let scale of [1, 0.75, 0.5, 0.25]) {
@@ -710,12 +762,12 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 36px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('⚔️ 相生相剋', width / 2, 1200);
+    ctx.fillText('⚔️ 相生相剋', width / 2, MATCH_TITLE_Y);
     
     // 最佳隊友（位置提前）
-    const boxY = 1240;
+    const boxY = MATCH_BOX_Y;
     const boxWidth = (width - 200) / 2;
-    const boxHeight = 120;
+    const boxHeight = MATCH_BOX_HEIGHT;
     roundRect(80, boxY, boxWidth, boxHeight, 20);
     ctx.fillStyle = 'rgba(16, 185, 129, 0.15)';
     ctx.fill();
@@ -749,15 +801,12 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
     // 測驗連結（位置提前）
     ctx.fillStyle = '#94a3b8';
     ctx.font = '24px sans-serif';
-    ctx.fillText('快來測測你是什麼類型的密室玩家！', width / 2, boxY + boxHeight + 60);
-    ctx.fillStyle = '#c084fc';
-    ctx.font = '22px sans-serif';
-    ctx.fillText(window.location.origin + '?tab=quiz', width / 2, boxY + boxHeight + 100);
+    ctx.fillText(window.location.origin + '?tab=quiz', width / 2, LINK_Y);
     
-    // 水印（位置提前）
+    // 水印
     ctx.fillStyle = '#64748b';
     ctx.font = '28px sans-serif';
-    ctx.fillText('made by IG:hu._escaperoom', width / 2, boxY + boxHeight + 180);
+    ctx.fillText('made by IG:hu._escaperoom', width / 2, WATERMARK_Y);
     
     return canvas;
   };
@@ -4854,7 +4903,10 @@ ${url}
                       <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>{quizResult.character.emoji}</div>
                       <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.75rem', marginBottom: '0.25rem' }}>{quizNickname} 的密室人格是</div>
                       <h2 style={{ fontSize: '1.5rem', fontWeight: 900, color: '#ffffff', marginBottom: '0.5rem' }}>{quizResult.character.name}</h2>
-                      <div style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.75rem', lineHeight: 1.6, fontStyle: 'italic' }}>
+                      <div
+                        style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.75rem', lineHeight: 1.6, fontStyle: 'italic' }}
+                        className="break-words whitespace-pre-wrap"
+                      >
                         「{quizResult.character.description.split('。').filter(s => s.trim()).map((part, i, arr) => (
                           <React.Fragment key={i}>
                             {part.trim()}
