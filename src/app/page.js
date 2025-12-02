@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { auth, googleProvider, db } from './firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { 
@@ -22,6 +22,255 @@ import {
     // 這些常數可以保留
 const today = new Date();
     // ...
+
+// ===== 角色人格測驗資料 =====
+const QUIZ_QUESTIONS = [
+  {
+    id: 1,
+    question: "剛進入一個全黑的密室空間，你的第一個反應是？",
+    options: [
+      { text: "手貼著牆壁，大喊「誰要在第一個？快點去！」", scores: { leadership: 2, courage: 1 } },
+      { text: "好啦，我走第一個啦...（無奈但可靠）", scores: { courage: 2, teamwork: 1 } },
+      { text: "（抓緊隊友）「欸！很黑欸！不要丟下我喔！」", scores: { teamwork: 2, humor: 1 } },
+      { text: "開始默默的探索四周環境", scores: { observation: 2, logic: 1 } }
+    ]
+  },
+  {
+    id: 2,
+    question: "小天使（NPC）突然衝出來嚇人，你的反應是？",
+    options: [
+      { text: "啊啊啊啊啊啊啊啊啊啊啊!!!!!! （靈魂出竅級慘叫）", scores: { humor: 2, teamwork: 1 } },
+      { text: "冷靜地看著他表演（心跳加速但面癱）。", scores: { courage: 2, observation: 1 } },
+      { text: "下意識舉起手中的道具防禦（物理驅魔）。", scores: { courage: 2, leadership: 1 } },
+      { text: "默默的看著被嚇壞的隊友，覺得好笑。", scores: { humor: 2, observation: 1 } }
+    ]
+  },
+  {
+    id: 3,
+    question: "密室需要爬通風管或鑽狗洞，你的想法是？",
+    options: [
+      { text: "衝第一！感覺超好玩！", scores: { courage: 2, leadership: 1 } },
+      { text: "先確認洞口有沒有乾淨，有沒有東西會突然衝出來。", scores: { observation: 2, logic: 1 } },
+      { text: "在洞口指揮：「裡面長怎樣？大聲回報！」", scores: { leadership: 2, teamwork: 1 } },
+      { text: "默默排在隊伍最後面，順便推前面隊友的屁股。", scores: { humor: 2, teamwork: 1 } }
+    ]
+  },
+  {
+    id: 4,
+    question: "看到一個四位數密碼鎖，目前只找到了三個數字，你會...?",
+    options: [
+      { text: "根據已知線索，嘗試推算最後一個數字的邏輯。", scores: { logic: 2, observation: 1 } },
+      { text: "暴力解鎖：從 0 到 9 直接轉一輪比較快！", scores: { courage: 2, humor: 1 } },
+      { text: "呼叫隊友：「欸，這題交給你們，我腦袋當機了。」", scores: { teamwork: 2, humor: 1 } },
+      { text: "站在旁邊看戲，負責幫忙照手電筒。", scores: { teamwork: 1, observation: 2 } }
+    ]
+  },
+  {
+    id: 5,
+    question: "遇到一道超難的邏輯題，卡關 10 分鐘了，你會？",
+    options: [
+      { text: "重新把題目文字再梳理一次。", scores: { logic: 2, observation: 1 } },
+      { text: "果斷按下對講機，找小天使（NPC）求救。", scores: { teamwork: 1, humor: 2 } },
+      { text: "繼續翻箱倒櫃，覺得一定還有線索沒找到。", scores: { observation: 2, courage: 1 } },
+      { text: "開始玩旁邊無關緊要的道具，等待神隊友救援。", scores: { humor: 2, teamwork: 1 } }
+    ]
+  },
+  {
+    id: 6,
+    question: "隊友找到了一個關鍵鑰匙，但他忘記是在哪裡找到的，你會？",
+    options: [
+      { text: "沒關係，有找到就好，能開鎖最重要。", scores: { teamwork: 2, courage: 1 } },
+      { text: "你怎麼可以忘記！這可能跟劇情細節有關欸！", scores: { observation: 2, logic: 1 } },
+      { text: "默默記下鑰匙形狀，思考剛才經過哪裡有對應的鎖頭。", scores: { logic: 2, observation: 1 } },
+      { text: "不管了，直接拿著鑰匙去試房間裡所有的鎖孔。", scores: { courage: 2, humor: 1 } }
+    ]
+  },
+  {
+    id: 7,
+    question: "遊戲結束聽解說時，發現還有一個隱藏彩蛋沒解開，你會？",
+    options: [
+      { text: "懊惱不已，甚至想二刷把彩蛋解出來。", scores: { observation: 2, logic: 1 } },
+      { text: "「蛤？有這個東西喔？」完全狀況外。", scores: { humor: 2, teamwork: 1 } },
+      { text: "雖然沒解開，但我剛才有猜到跟那個有點關係！（馬後炮）", scores: { humor: 2, leadership: 1 } },
+      { text: "沒差啦，過程玩得開心比較重要。", scores: { teamwork: 2, courage: 1 } }
+    ]
+  },
+  {
+    id: 8,
+    question: "關於「密室劇情」，你是哪一派？",
+    options: [
+      { text: "閱讀狂魔：每一張紙條都要看，並大聲唸給隊友聽。", scores: { observation: 2, leadership: 1 } },
+      { text: "劇情無用論：字太多不看，找紅字/粗體字/數字才是重點。", scores: { logic: 2, courage: 1 } },
+      { text: "沉浸式玩家：會跟著劇情哭或生氣，把自己當成故事主角。", scores: { teamwork: 1, humor: 2 } },
+      { text: "金魚腦：出來後只記得「有鬼」跟「有鎖」，劇情全忘光。", scores: { humor: 2, courage: 1 } }
+    ]
+  },
+  {
+    id: 9,
+    question: "2025 年你覺得自己在密室裡講最多次的一句話是？",
+    options: [
+      { text: "這裡有一個鎖！/ 這裡有鑰匙！", scores: { observation: 2, teamwork: 1 } },
+      { text: "我不行、我不要、你走前面。", scores: { humor: 2, teamwork: 1 } },
+      { text: "我有個想法...但我不知道對不對。", scores: { logic: 2, teamwork: 1 } },
+      { text: "「這題邏輯應該是這樣...」（推眼鏡）", scores: { logic: 2, leadership: 1 } }
+    ]
+  },
+  {
+    id: 10,
+    question: "如果可以選擇，你最希望在密室裡獲得什麼超能力？",
+    options: [
+      { text: "夜視能力，完全不怕黑，還能看清隊友醜態。", scores: { courage: 2, humor: 1 } },
+      { text: "瞬間移動，不用爬來爬去，也不會被隊友擋路。", scores: { courage: 1, logic: 2 } },
+      { text: "讀心術，直接知道設計者這題想幹嘛。", scores: { logic: 2, observation: 1 } },
+      { text: "絕對強運，亂按密碼都會開，運氣也是實力。", scores: { humor: 2, courage: 1 } }
+    ]
+  }
+];
+
+// 六邊形屬性定義 (GUTS/LEAD/LOGIC/OBS/TEAM/FUN)
+const QUIZ_ATTRIBUTES = [
+  { key: 'courage', name: '膽量', color: '#ef4444' },        // 紅色 GUTS
+  { key: 'leadership', name: '領導', color: '#f59e0b' },     // 黃色 LEAD
+  { key: 'logic', name: '邏輯', color: '#3b82f6' },          // 藍色 LOGIC
+  { key: 'observation', name: '觀察', color: '#22c55e' },    // 綠色 OBS
+  { key: 'teamwork', name: '團隊', color: '#a855f7' },       // 紫色 TEAM
+  { key: 'humor', name: '歡樂', color: '#ec4899' }           // 粉色 FUN
+];
+
+// 角色類型定義
+// 角色類型定義 - Ver 3.0 六大角色卡
+const QUIZ_CHARACTERS = [
+  {
+    id: 'hamster',
+    name: '瑟瑟發抖倉鼠',
+    emoji: '🐹',
+    description: '啊啊啊啊！不要過來！你是 NPC 眼中的 MVP，尖叫聲讓整場都有情緒價值。',
+    // 歡樂高 + 膽量是最低的屬性
+    condition: (scores, top2, bottom) => bottom === 'courage' || (top2.includes('humor') && scores.courage <= 4),
+    bestMatch: 'tank',
+    bestMatchName: '鋼鐵坦克',
+    enemy: 'brute',
+    enemyName: '暴力解鎖王',
+    gradient: 'from-pink-400 to-orange-400'
+  },
+  {
+    id: 'brute',
+    name: '暴力解鎖王',
+    emoji: '🔓',
+    description: '我不小心打開了欸...我只是隨便轉轉。你擁有「絕對強運」的超能力！',
+    // 膽量 + 歡樂組合，但邏輯低
+    condition: (scores, top2, bottom) => top2.includes('courage') && top2.includes('humor'),
+    bestMatch: 'hamster',
+    bestMatchName: '瑟瑟發抖倉鼠',
+    enemy: 'brain',
+    enemyName: '通靈軍師',
+    gradient: 'from-orange-500 to-red-500'
+  },
+  {
+    id: 'tank',
+    name: '鋼鐵坦克',
+    emoji: '🛡️',
+    description: '別怕，躲我後面，是假人啦。黑暗對你來說只是另一種顏色的燈光。',
+    // 膽量 + 領導組合
+    condition: (scores, top2) => top2.includes('courage') && top2.includes('leadership'),
+    bestMatch: 'hamster',
+    bestMatchName: '瑟瑟發抖倉鼠',
+    enemy: 'actor',
+    enemyName: '沉浸式影帝',
+    gradient: 'from-slate-600 to-zinc-700'
+  },
+  {
+    id: 'actor',
+    name: '沉浸式影帝',
+    emoji: '🎭',
+    description: '嗚嗚嗚...原來小美是這樣死的...太可憐了。你是最尊重設計者的玩家。',
+    // 團隊 + 觀察組合
+    condition: (scores, top2) => top2.includes('teamwork') && top2.includes('observation'),
+    bestMatch: 'tank',
+    bestMatchName: '鋼鐵坦克',
+    enemy: 'brute',
+    enemyName: '暴力解鎖王',
+    gradient: 'from-purple-500 to-pink-500'
+  },
+  {
+    id: 'brain',
+    name: '通靈軍師',
+    emoji: '🧠',
+    description: '根據這四個符號的排列，密碼是 520。你是行走的人體 CPU。',
+    // 邏輯最高
+    condition: (scores, top2) => top2[0] === 'logic',
+    bestMatch: 'scanner',
+    bestMatchName: '人體掃描機',
+    enemy: 'brute',
+    enemyName: '暴力解鎖王',
+    gradient: 'from-blue-500 to-indigo-600'
+  },
+  {
+    id: 'scanner',
+    name: '人體掃描機',
+    emoji: '🔍',
+    description: '欸！這裡有一把鑰匙！沙發縫裡還有一個硬幣！你擁有全場最強動態視力。',
+    // 觀察最高
+    condition: (scores, top2) => top2[0] === 'observation',
+    bestMatch: 'brain',
+    bestMatchName: '通靈軍師',
+    enemy: 'hamster',
+    enemyName: '瑟瑟發抖倉鼠',
+    gradient: 'from-emerald-500 to-teal-600'
+  },
+  {
+    id: 'tank_solo',
+    name: '鋼鐵坦克',
+    emoji: '🛡️',
+    description: '別怕，躲我後面，是假人啦。黑暗對你來說只是另一種顏色的燈光。',
+    // 膽量最高（單獨）
+    condition: (scores, top2) => top2[0] === 'courage',
+    bestMatch: 'hamster',
+    bestMatchName: '瑟瑟發抖倉鼠',
+    enemy: 'actor',
+    enemyName: '沉浸式影帝',
+    gradient: 'from-slate-600 to-zinc-700'
+  },
+  {
+    id: 'actor_solo',
+    name: '沉浸式影帝',
+    emoji: '🎭',
+    description: '嗚嗚嗚...原來小美是這樣死的...太可憐了。你是最尊重設計者的玩家。',
+    // 團隊最高（單獨）
+    condition: (scores, top2) => top2[0] === 'teamwork',
+    bestMatch: 'tank',
+    bestMatchName: '鋼鐵坦克',
+    enemy: 'brute',
+    enemyName: '暴力解鎖王',
+    gradient: 'from-purple-500 to-pink-500'
+  },
+  {
+    id: 'leader',
+    name: '鋼鐵坦克',
+    emoji: '🛡️',
+    description: '別怕，躲我後面。你是隊伍的箭頭，負責走第一個開路！',
+    // 領導最高
+    condition: (scores, top2) => top2[0] === 'leadership',
+    bestMatch: 'hamster',
+    bestMatchName: '瑟瑟發抖倉鼠',
+    enemy: 'actor',
+    enemyName: '沉浸式影帝',
+    gradient: 'from-amber-500 to-orange-600'
+  },
+  {
+    id: 'hamster_fun',
+    name: '瑟瑟發抖倉鼠',
+    emoji: '🐹',
+    description: '我要回家...你們去就好，我在這裡等...你為陰森密室帶來滿滿情緒價值！',
+    // 歡樂最高
+    condition: (scores, top2) => top2[0] === 'humor',
+    bestMatch: 'tank',
+    bestMatchName: '鋼鐵坦克',
+    enemy: 'brute',
+    enemyName: '暴力解鎖王',
+    gradient: 'from-pink-400 to-orange-400'
+  }
+];
 
 const INITIAL_PROMOTIONS = [
   {
@@ -109,6 +358,42 @@ const getDefaultFormData = () => ({
 });
 
 const generateRandomId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+// ===== 測驗相關函數 =====
+const calculateQuizResult = (answers) => {
+  const scores = {
+    leadership: 0,
+    courage: 0,
+    logic: 0,
+    observation: 0,
+    teamwork: 0,
+    humor: 0
+  };
+
+  // 計算各屬性分數
+  Object.values(answers).forEach(answer => {
+    if (answer?.scores) {
+      Object.entries(answer.scores).forEach(([attr, score]) => {
+        scores[attr] = (scores[attr] || 0) + score;
+      });
+    }
+  });
+
+  // 排序屬性（高到低）
+  const sortedAttrs = Object.entries(scores)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key]) => key);
+  const top2 = sortedAttrs.slice(0, 2);
+  const bottom = sortedAttrs[sortedAttrs.length - 1]; // 最低分的屬性
+
+  // 找出匹配的角色（依序檢查條件）
+  let character = QUIZ_CHARACTERS.find(c => c.condition(scores, top2, bottom));
+  if (!character) {
+    character = QUIZ_CHARACTERS[QUIZ_CHARACTERS.length - 1]; // 默認角色
+  }
+
+  return { scores, character, top2, bottom };
+};
 
 const isGoogleMapsLink = (url) => {
   if (!url) return false;
@@ -241,6 +526,268 @@ const [guestSessionOptions, setGuestSessionOptions] = useState([]);
   const [showChainModal, setShowChainModal] = useState(false);
   const [chainEventTarget, setChainEventTarget] = useState(null);
   const [chainSelection, setChainSelection] = useState({});
+
+  // 角色人格測驗狀態
+  const [quizNickname, setQuizNickname] = useState("");
+  const [quizStep, setQuizStep] = useState('intro'); // 'intro', 'nickname', 'questions', 'result'
+  const [quizCurrentQ, setQuizCurrentQ] = useState(0);
+  const [quizAnswers, setQuizAnswers] = useState({});
+  const [quizResult, setQuizResult] = useState(null);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+
+  // 用 Canvas 繪製測驗結果圖片 (9:16 比例，適合 IG 限動)
+  const generateQuizResultImage = async (nickname, result) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // 9:16 比例 (1080 x 1920)
+    const width = 1080;
+    const height = 1920;
+    canvas.width = width;
+    canvas.height = height;
+    
+    // 背景漸層
+    const bgGradient = ctx.createLinearGradient(0, 0, width, height);
+    bgGradient.addColorStop(0, '#0f172a');
+    bgGradient.addColorStop(1, '#020617');
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, width, height);
+    
+    // 裝飾圓形
+    ctx.fillStyle = 'rgba(168, 85, 247, 0.1)';
+    ctx.beginPath();
+    ctx.arc(width * 0.8, height * 0.1, 200, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(width * 0.2, height * 0.9, 150, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // 標題
+    ctx.fillStyle = '#c084fc';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🎮 2025 密室玩家年度回顧', width / 2, 120);
+    
+    // 角色漸層背景
+    const characterColors = {
+      hamster: ['#f472b6', '#fb923c'],      // 粉橘 - 倉鼠
+      hamster_fun: ['#f472b6', '#fb923c'],  // 粉橘 - 倉鼠(歡樂型)
+      brute: ['#f97316', '#ef4444'],        // 橘紅 - 暴力解鎖王
+      tank: ['#475569', '#3f3f46'],         // 深灰 - 坦克
+      tank_solo: ['#475569', '#3f3f46'],    // 深灰 - 坦克(單獨)
+      actor: ['#a855f7', '#ec4899'],        // 紫粉 - 影帝
+      actor_solo: ['#a855f7', '#ec4899'],   // 紫粉 - 影帝(單獨)
+      brain: ['#3b82f6', '#4f46e5'],        // 藍靛 - 軍師
+      scanner: ['#10b981', '#0d9488'],      // 綠青 - 掃描機
+      leader: ['#f59e0b', '#ea580c']        // 黃橘 - 領導型坦克
+    };
+    
+    const colors = characterColors[result.character.id] || characterColors.balanced;
+    const cardGradient = ctx.createLinearGradient(100, 180, width - 100, 580);
+    cardGradient.addColorStop(0, colors[0]);
+    cardGradient.addColorStop(1, colors[1]);
+    
+    // 圓角矩形函數
+    const roundRect = (x, y, w, h, r) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    };
+    
+    // 角色卡片
+    roundRect(60, 180, width - 120, 400, 40);
+    ctx.fillStyle = cardGradient;
+    ctx.fill();
+    
+    // 半透明覆蓋
+    roundRect(60, 180, width - 120, 400, 40);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.fill();
+    
+    // Emoji
+    ctx.font = '120px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(result.character.emoji, width / 2, 320);
+    
+    // 暱稱
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.font = '32px sans-serif';
+    ctx.fillText(`${nickname} 的密室人格是`, width / 2, 390);
+    
+    // 角色名稱
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 64px sans-serif';
+    ctx.fillText(result.character.name, width / 2, 470);
+    
+    // 角色描述
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.font = 'italic 28px sans-serif';
+    const desc = `「${result.character.description}」`;
+    ctx.fillText(desc, width / 2, 540);
+    
+    // 屬性面板標題
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.fillText('🎯 屬性面板', width / 2, 660);
+    
+    // 六邊形雷達圖
+    const centerX = width / 2;
+    const centerY = 920;
+    const maxRadius = 200;
+    
+    // 背景六邊形
+    for (let scale of [1, 0.75, 0.5, 0.25]) {
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = (i * 60 - 90) * (Math.PI / 180);
+        const x = centerX + maxRadius * scale * Math.cos(angle);
+        const y = centerY + maxRadius * scale * Math.sin(angle);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    
+    // 軸線
+    for (let i = 0; i < 6; i++) {
+      const angle = (i * 60 - 90) * (Math.PI / 180);
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.lineTo(centerX + maxRadius * Math.cos(angle), centerY + maxRadius * Math.sin(angle));
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    
+    // 數據多邊形
+    ctx.beginPath();
+    const maxScore = 20;
+    QUIZ_ATTRIBUTES.forEach((attr, i) => {
+      const angle = (i * 60 - 90) * (Math.PI / 180);
+      const score = result.scores[attr.key] || 0;
+      const r = (score / maxScore) * maxRadius;
+      const x = centerX + r * Math.cos(angle);
+      const y = centerY + r * Math.sin(angle);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(168, 85, 247, 0.4)';
+    ctx.fill();
+    ctx.strokeStyle = '#a855f7';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    
+    // 數據點和標籤
+    QUIZ_ATTRIBUTES.forEach((attr, i) => {
+      const angle = (i * 60 - 90) * (Math.PI / 180);
+      const score = result.scores[attr.key] || 0;
+      const r = (score / maxScore) * maxRadius;
+      
+      // 數據點
+      ctx.beginPath();
+      ctx.arc(centerX + r * Math.cos(angle), centerY + r * Math.sin(angle), 8, 0, Math.PI * 2);
+      ctx.fillStyle = attr.color;
+      ctx.fill();
+      
+      // 標籤
+      const labelR = maxRadius + 40;
+      ctx.fillStyle = attr.color;
+      ctx.font = 'bold 28px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(attr.name, centerX + labelR * Math.cos(angle), centerY + labelR * Math.sin(angle) + 10);
+    });
+    
+    // 分數列表
+    const scoreY = 1200;
+    const scoreBoxWidth = 160;
+    const scoreBoxHeight = 80;
+    const scoreGap = 20;
+    const startX = (width - (3 * scoreBoxWidth + 2 * scoreGap)) / 2;
+    
+    QUIZ_ATTRIBUTES.forEach((attr, i) => {
+      const row = Math.floor(i / 3);
+      const col = i % 3;
+      const x = startX + col * (scoreBoxWidth + scoreGap);
+      const y = scoreY + row * (scoreBoxHeight + 15);
+      
+      roundRect(x, y, scoreBoxWidth, scoreBoxHeight, 12);
+      ctx.fillStyle = attr.color + '33';
+      ctx.fill();
+      
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(attr.name, x + scoreBoxWidth / 2, y + 30);
+      
+      ctx.fillStyle = attr.color;
+      ctx.font = 'bold 32px sans-serif';
+      ctx.fillText(result.scores[attr.key] || 0, x + scoreBoxWidth / 2, y + 65);
+    });
+    
+    // 相生相剋標題
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('⚔️ 相生相剋', width / 2, 1450);
+    
+    // 最佳隊友
+    roundRect(80, 1490, (width - 200) / 2, 120, 20);
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.15)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(16, 185, 129, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    ctx.fillStyle = '#34d399';
+    ctx.font = '24px sans-serif';
+    ctx.fillText('最佳隊友', 80 + (width - 200) / 4, 1535);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.fillText(result.character.bestMatchName, 80 + (width - 200) / 4, 1585);
+    
+    // 天敵
+    roundRect(width / 2 + 20, 1490, (width - 200) / 2, 120, 20);
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    ctx.fillStyle = '#f87171';
+    ctx.font = '24px sans-serif';
+    ctx.fillText('天敵', width / 2 + 20 + (width - 200) / 4, 1535);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.fillText(result.character.enemyName, width / 2 + 20 + (width - 200) / 4, 1585);
+    
+    // 測驗連結
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '24px sans-serif';
+    ctx.fillText('快來測測你是什麼類型的密室玩家！', width / 2, 1700);
+    ctx.fillStyle = '#c084fc';
+    ctx.font = '22px sans-serif';
+    ctx.fillText(window.location.origin + '?tab=quiz', width / 2, 1740);
+    
+    // 水印
+    ctx.fillStyle = '#64748b';
+    ctx.font = '28px sans-serif';
+    ctx.fillText('made by IG:hu._escaperoom', width / 2, 1850);
+    
+    return canvas;
+  };
+
 const [showIdentityModal, setShowIdentityModal] = useState(false);
 const [identityIntent, setIdentityIntent] = useState(null);
 const [pendingIdentityAction, setPendingIdentityAction] = useState(null);
@@ -354,7 +901,13 @@ const handleIdentityGroupConfirm = () => {
         const sharedEventId = urlParams.get('eventId');
         const sharedHostUid = urlParams.get('host');
         const sharedWishId = urlParams.get('wishId');
-        if (sharedEventId) {
+        const sharedTab = urlParams.get('tab');
+        
+        // 處理 tab 參數（優先檢查 quiz）
+        if (sharedTab === 'quiz') {
+            setActiveTab('quiz');
+            setQuizStep('intro');
+        } else if (sharedEventId) {
             setFilterEventId(sharedEventId);
             setActiveTab('lobby');
         } else if (sharedWishId) {
@@ -2389,9 +2942,21 @@ ${url}
             />
             <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent truncate">
               小迷糊密室逃脫揪團平台
-            </h1>
+          </h1>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                setActiveTab('quiz');
+                setQuizStep('intro');
+                setQuizCurrentQ(0);
+                setQuizAnswers({});
+                setQuizResult(null);
+              }}
+              className="text-xs font-bold px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-400 hover:to-pink-400 flex items-center gap-1 animate-pulse"
+            >
+              🎮 人格測驗
+            </button>
             {!user?.isVisitor ? (
               <>
                 <span className="text-sm text-slate-400 hidden sm:inline">{user.displayName}</span>
@@ -4103,6 +4668,514 @@ ${url}
                 })
               )}
             </div>
+          </div>
+        )}
+
+        {/* ===== 角色人格測驗 Tab ===== */}
+        {activeTab === 'quiz' && (
+          <div className="space-y-4 animate-in fade-in duration-300 pb-24">
+            
+            {/* 返回按鈕 */}
+            <button
+              onClick={() => setActiveTab('lobby')}
+              className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-4"
+            >
+              <ArrowLeft size={20} />
+              <span>返回大廳</span>
+            </button>
+
+            {/* 測驗介紹頁 */}
+            {quizStep === 'intro' && (
+              <div className="bg-gradient-to-br from-purple-900/50 to-pink-900/50 rounded-3xl p-6 border border-purple-500/30 text-center relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-full bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50"></div>
+                
+                <div className="relative z-10">
+                  <div className="text-6xl mb-4">🎮</div>
+                  <h2 className="text-2xl font-bold text-white mb-2">2025 密室玩家年度回顧</h2>
+                  <h3 className="text-lg text-purple-300 mb-6">× 角色人格測驗</h3>
+                  
+                  <p className="text-slate-300 mb-6 text-sm leading-relaxed">
+                    10 道題目，揭曉你在密室裡的真實面貌！<br/>
+                    你是指揮官、解謎王、還是氣氛擔當？
+                  </p>
+
+                  <div className="flex flex-wrap justify-center gap-2 mb-6">
+                    {QUIZ_ATTRIBUTES.map(attr => (
+                      <span 
+                        key={attr.key}
+                        className="px-3 py-1 rounded-full text-xs font-bold"
+                        style={{ backgroundColor: attr.color + '30', color: attr.color }}
+                      >
+                        {attr.name}
+                      </span>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => setQuizStep('nickname')}
+                    className="w-full py-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold rounded-2xl text-lg hover:from-purple-400 hover:to-pink-400 transition-all transform hover:scale-[1.02] shadow-lg shadow-purple-500/30"
+                  >
+                    開始測驗 →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 輸入暱稱頁 */}
+            {quizStep === 'nickname' && (
+              <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800">
+                <div className="text-center mb-6">
+                  <div className="text-4xl mb-3">✏️</div>
+                  <h2 className="text-xl font-bold text-white mb-2">輸入你的暱稱</h2>
+                  <p className="text-slate-400 text-sm">這會顯示在你的測驗結果上</p>
+                </div>
+
+                <input
+                  type="text"
+                  value={quizNickname}
+                  onChange={(e) => setQuizNickname(e.target.value)}
+                  placeholder="請輸入暱稱..."
+                  maxLength={20}
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 text-center text-lg mb-4"
+                />
+
+                <button
+                  onClick={() => {
+                    if (quizNickname.trim()) {
+                      setQuizStep('questions');
+                    }
+                  }}
+                  disabled={!quizNickname.trim()}
+                  className="w-full py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:from-purple-400 hover:to-pink-400 transition-all"
+                >
+                  正式開始 →
+                </button>
+              </div>
+            )}
+
+            {/* 答題頁 */}
+            {quizStep === 'questions' && (
+              <div className="space-y-4">
+                {/* 進度條 */}
+                <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-slate-400 text-sm">題目進度</span>
+                    <span className="text-purple-400 font-bold">{quizCurrentQ + 1} / {QUIZ_QUESTIONS.length}</span>
+                  </div>
+                  <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
+                      style={{ width: `${((quizCurrentQ + 1) / QUIZ_QUESTIONS.length) * 100}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* 題目卡片 */}
+                <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800">
+                  <div className="text-purple-400 text-sm font-bold mb-2">Q{quizCurrentQ + 1}</div>
+                  <h3 className="text-lg font-bold text-white mb-6 leading-relaxed">
+                    {QUIZ_QUESTIONS[quizCurrentQ].question}
+                  </h3>
+
+                  <div className="space-y-3">
+                    {QUIZ_QUESTIONS[quizCurrentQ].options.map((option, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          const newAnswers = { ...quizAnswers, [quizCurrentQ]: option };
+                          setQuizAnswers(newAnswers);
+                          
+                          // 延遲跳轉到下一題
+                          setTimeout(() => {
+                            if (quizCurrentQ < QUIZ_QUESTIONS.length - 1) {
+                              setQuizCurrentQ(quizCurrentQ + 1);
+                            } else {
+                              // 計算結果
+                              const result = calculateQuizResult(newAnswers);
+                              setQuizResult(result);
+                              setQuizStep('result');
+                            }
+                          }, 300);
+                        }}
+                        className={`w-full p-4 text-left rounded-xl border transition-all ${
+                          quizAnswers[quizCurrentQ] === option
+                            ? 'bg-purple-500/20 border-purple-500 text-white'
+                            : 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800 hover:border-slate-600'
+                        }`}
+                      >
+                        <span className="text-purple-400 font-bold mr-2">{String.fromCharCode(65 + idx)}.</span>
+                        {option.text}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 導航按鈕 */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setQuizCurrentQ(Math.max(0, quizCurrentQ - 1))}
+                    disabled={quizCurrentQ === 0}
+                    className="flex-1 py-3 bg-slate-800 text-slate-300 font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-700 transition-colors"
+                  >
+                    ← 上一題
+                  </button>
+                  {quizAnswers[quizCurrentQ] && quizCurrentQ < QUIZ_QUESTIONS.length - 1 && (
+                    <button
+                      onClick={() => setQuizCurrentQ(quizCurrentQ + 1)}
+                      className="flex-1 py-3 bg-purple-500 text-white font-bold rounded-xl hover:bg-purple-400 transition-colors"
+                    >
+                      下一題 →
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 結果頁 */}
+            {quizStep === 'result' && quizResult && (
+              <div className="space-y-4">
+                
+                {/* 結果卡片區域 */}
+                <div 
+                  className="space-y-3 p-4 rounded-3xl"
+                  style={{ backgroundColor: '#020617' }}
+                >
+                  {/* 標題 */}
+                  <div className="text-center mb-2">
+                    <div style={{ color: '#c084fc' }} className="text-xs font-bold">🎮 2025 密室玩家年度回顧</div>
+                  </div>
+                  
+                  {/* 主結果卡片 */}
+                  <div 
+                    className="rounded-2xl p-5 text-center relative overflow-hidden"
+                    style={{ 
+                      background: quizResult.character.id === 'tank' ? 'linear-gradient(to bottom right, #f59e0b, #ea580c)' :
+                                  quizResult.character.id === 'brain' ? 'linear-gradient(to bottom right, #3b82f6, #4f46e5)' :
+                                  quizResult.character.id === 'observer' ? 'linear-gradient(to bottom right, #10b981, #0d9488)' :
+                                  quizResult.character.id === 'leader' ? 'linear-gradient(to bottom right, #eab308, #d97706)' :
+                                  quizResult.character.id === 'support' ? 'linear-gradient(to bottom right, #ec4899, #e11d48)' :
+                                  quizResult.character.id === 'team' ? 'linear-gradient(to bottom right, #a855f7, #7c3aed)' :
+                                  quizResult.character.id === 'chaos' ? 'linear-gradient(to bottom right, #06b6d4, #3b82f6)' :
+                                  'linear-gradient(to bottom right, #64748b, #334155)'
+                    }}
+                  >
+                    <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.2)' }}></div>
+                    <div style={{ position: 'relative', zIndex: 10 }}>
+                      <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>{quizResult.character.emoji}</div>
+                      <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.75rem', marginBottom: '0.25rem' }}>{quizNickname} 的密室人格是</div>
+                      <h2 style={{ fontSize: '1.5rem', fontWeight: 900, color: '#ffffff', marginBottom: '0.5rem' }}>{quizResult.character.name}</h2>
+                      <p style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.75rem', lineHeight: 1.6, fontStyle: 'italic' }}>
+                        「{quizResult.character.description}」
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 六邊形雷達圖 */}
+                  <div className="rounded-2xl p-4" style={{ backgroundColor: '#0f172a' }}>
+                    <h3 style={{ color: '#ffffff', fontWeight: 700, marginBottom: '0.75rem', textAlign: 'center', fontSize: '0.875rem' }}>🎯 屬性面板</h3>
+                    
+                    {/* SVG 雷達圖 */}
+                    <div className="flex justify-center mb-3">
+                      <svg viewBox="0 0 200 200" className="w-48 h-48">
+                        {/* 背景六邊形網格 */}
+                        {[1, 0.75, 0.5, 0.25].map((scale, i) => (
+                          <polygon
+                            key={i}
+                            points={QUIZ_ATTRIBUTES.map((_, idx) => {
+                              const angle = (idx * 60 - 90) * (Math.PI / 180);
+                              const r = 80 * scale;
+                              return `${100 + r * Math.cos(angle)},${100 + r * Math.sin(angle)}`;
+                            }).join(' ')}
+                            fill="none"
+                            stroke="#334155"
+                            strokeWidth="1"
+                          />
+                        ))}
+                        
+                        {/* 軸線 */}
+                        {QUIZ_ATTRIBUTES.map((_, idx) => {
+                          const angle = (idx * 60 - 90) * (Math.PI / 180);
+                          return (
+                            <line
+                              key={idx}
+                              x1="100"
+                              y1="100"
+                              x2={100 + 80 * Math.cos(angle)}
+                              y2={100 + 80 * Math.sin(angle)}
+                              stroke="#334155"
+                              strokeWidth="1"
+                            />
+                          );
+                        })}
+                        
+                        {/* 數據多邊形 */}
+                        <polygon
+                          points={QUIZ_ATTRIBUTES.map((attr, idx) => {
+                            const angle = (idx * 60 - 90) * (Math.PI / 180);
+                            const maxScore = 20;
+                            const score = quizResult.scores[attr.key] || 0;
+                            const r = (score / maxScore) * 80;
+                            return `${100 + r * Math.cos(angle)},${100 + r * Math.sin(angle)}`;
+                          }).join(' ')}
+                          fill="rgba(168, 85, 247, 0.3)"
+                          stroke="#a855f7"
+                          strokeWidth="2"
+                        />
+                        
+                        {/* 數據點 */}
+                        {QUIZ_ATTRIBUTES.map((attr, idx) => {
+                          const angle = (idx * 60 - 90) * (Math.PI / 180);
+                          const maxScore = 20;
+                          const score = quizResult.scores[attr.key] || 0;
+                          const r = (score / maxScore) * 80;
+                          return (
+                            <circle
+                              key={idx}
+                              cx={100 + r * Math.cos(angle)}
+                              cy={100 + r * Math.sin(angle)}
+                              r="4"
+                              fill={attr.color}
+                            />
+                          );
+                        })}
+                        
+                        {/* 標籤 */}
+                        {QUIZ_ATTRIBUTES.map((attr, idx) => {
+                          const angle = (idx * 60 - 90) * (Math.PI / 180);
+                          const r = 95;
+                          return (
+                            <text
+                              key={idx}
+                              x={100 + r * Math.cos(angle)}
+                              y={100 + r * Math.sin(angle)}
+                              textAnchor="middle"
+                              dominantBaseline="middle"
+                              fill={attr.color}
+                              fontSize="10"
+                              fontWeight="bold"
+                            >
+                              {attr.name}
+                            </text>
+                          );
+                        })}
+                      </svg>
+                    </div>
+
+                    {/* 分數列表 */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.375rem' }}>
+                      {QUIZ_ATTRIBUTES.map(attr => (
+                        <div 
+                          key={attr.key}
+                          style={{ 
+                            textAlign: 'center', 
+                            padding: '0.375rem', 
+                            borderRadius: '0.5rem',
+                            backgroundColor: attr.color + '33'
+                          }}
+                        >
+                          <div style={{ fontSize: '10px', color: '#94a3b8' }}>{attr.name}</div>
+                          <div style={{ fontWeight: 700, fontSize: '0.875rem', color: attr.color }}>
+                            {quizResult.scores[attr.key] || 0}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 相生相剋 */}
+                  <div className="rounded-2xl p-4" style={{ backgroundColor: '#0f172a' }}>
+                    <h3 style={{ color: '#ffffff', fontWeight: 700, marginBottom: '0.75rem', textAlign: 'center', fontSize: '0.875rem' }}>⚔️ 相生相剋</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
+                      <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '0.75rem', padding: '0.75rem', textAlign: 'center' }}>
+                        <div style={{ color: '#34d399', fontSize: '10px', marginBottom: '0.125rem' }}>最佳隊友</div>
+                        <div style={{ color: '#ffffff', fontWeight: 700, fontSize: '0.875rem' }}>{quizResult.character.bestMatchName}</div>
+                      </div>
+                      <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '0.75rem', padding: '0.75rem', textAlign: 'center' }}>
+                        <div style={{ color: '#f87171', fontSize: '10px', marginBottom: '0.125rem' }}>天敵</div>
+                        <div style={{ color: '#ffffff', fontWeight: 700, fontSize: '0.875rem' }}>{quizResult.character.enemyName}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 水印 */}
+                  <div style={{ textAlign: 'center', paddingTop: '0.5rem' }}>
+                    <div style={{ color: '#64748b', fontSize: '10px' }}>made by IG:hu._escaperoom</div>
+                  </div>
+                </div>
+
+                {/* 分享按鈕區域 */}
+                <div className="space-y-3">
+                  {/* 分享到 IG 說明 */}
+                  <div className="bg-gradient-to-r from-purple-500/10 via-pink-500/10 to-orange-500/10 border border-purple-500/30 rounded-2xl p-4">
+                    <div className="text-center text-white font-bold mb-2">📱 分享到 Instagram 限動</div>
+                    <div className="text-slate-400 text-xs text-center mb-3">
+                      生成 9:16 比例的精美圖片
+                    </div>
+                    
+                    {/* 生成/分享圖片按鈕 */}
+                    <button
+                      onClick={async () => {
+                        if (isGeneratingImage) return;
+                        
+                        setIsGeneratingImage(true);
+                        showToast("正在生成圖片...", "info");
+                        
+                        // 檢測是否為真正的手機（排除 Windows/Mac 桌面）
+                        const userAgent = navigator.userAgent;
+                        const isWindows = /Windows/i.test(userAgent);
+                        const isMac = /Macintosh/i.test(userAgent);
+                        const isDesktop = isWindows || isMac;
+                        const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+                        const isMobile = isMobileDevice && !isDesktop;
+                        
+                        try {
+                          const canvas = await generateQuizResultImage(quizNickname, quizResult);
+                          
+                          // 轉換為 blob
+                          canvas.toBlob(async (blob) => {
+                            if (!blob) {
+                              showToast("圖片生成失敗", "error");
+                              setIsGeneratingImage(false);
+                              return;
+                            }
+                            
+                            // 只有手機才使用 Web Share API 分享
+                            if (isMobile && navigator.share && navigator.canShare) {
+                              const file = new File([blob], 'quiz-result.png', { type: 'image/png' });
+                              const shareData = { files: [file] };
+                              
+                              if (navigator.canShare(shareData)) {
+                                try {
+                                  await navigator.share(shareData);
+                                  showToast("分享成功！", "success");
+                                  setIsGeneratingImage(false);
+                                  return;
+                                } catch (err) {
+                                  if (err.name === 'AbortError') {
+                                    setIsGeneratingImage(false);
+                                    return;
+                                  }
+                                  // 分享失敗，改為下載
+                                }
+                              }
+                            }
+                            
+                            // 電腦：直接下載圖片
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `密室人格測驗_${quizNickname}_${quizResult.character.name}.png`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                            showToast("圖片已下載！請到 IG 限動上傳分享", "success");
+                            setIsGeneratingImage(false);
+                          }, 'image/png');
+                        } catch (err) {
+                          console.error('Image generation error:', err);
+                          showToast("圖片生成失敗，請稍後再試", "error");
+                          setIsGeneratingImage(false);
+                        }
+                      }}
+                      disabled={isGeneratingImage}
+                      className="w-full py-4 bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      {isGeneratingImage ? (
+                        <>
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          生成中...
+                        </>
+                      ) : (
+                        <>
+                          <Download size={20} />
+                          📸 分享/下載圖片 (手機/PC)
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  
+                  {/* 分享測驗按鈕 */}
+                  <button
+                    onClick={async () => {
+                      const shareText = `🎮 2025 密室玩家年度回顧
+
+我是「${quizResult.character.name}」${quizResult.character.emoji}
+
+「${quizResult.character.description}」
+
+最佳隊友：${quizResult.character.bestMatchName}
+天敵：${quizResult.character.enemyName}
+
+快來測測你是什麼類型的密室玩家！
+${window.location.origin}?tab=quiz
+
+made by IG:hu._escaperoom`;
+                      
+                      // 檢測是否為真正的手機（排除 Windows/Mac 桌面）
+                      const userAgent = navigator.userAgent;
+                      const isWindows = /Windows/i.test(userAgent);
+                      const isMac = /Macintosh/i.test(userAgent);
+                      const isDesktop = isWindows || isMac;
+                      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+                      const isMobile = isMobileDevice && !isDesktop;
+                      
+                      if (isMobile && navigator.share) {
+                        try {
+                          await navigator.share({
+                            title: '2025 密室玩家人格測驗',
+                            text: shareText,
+                            url: window.location.origin + '?tab=quiz'
+                          });
+                          showToast("分享成功！", "success");
+                          return;
+                        } catch (err) {
+                          if (err.name === 'AbortError') return;
+                        }
+                      }
+                      
+                      // 電腦：直接複製文字
+                      try {
+                        await navigator.clipboard.writeText(shareText);
+                        showToast("已複製分享文字！", "success");
+                      } catch {
+                        showToast("複製失敗，請手動選取複製", "error");
+                      }
+                    }}
+                    className="w-full py-3 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Share2 size={18} />
+                    分享測驗
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setQuizStep('intro');
+                      setQuizCurrentQ(0);
+                      setQuizAnswers({});
+                      setQuizResult(null);
+                      setQuizNickname("");
+                    }}
+                    className="w-full py-3 bg-slate-800 text-slate-300 font-bold rounded-xl hover:bg-slate-700 transition-colors"
+                  >
+                    重新測驗
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('lobby')}
+                    className="w-full py-3 bg-emerald-500/20 text-emerald-400 font-bold rounded-xl hover:bg-emerald-500/30 transition-colors"
+                  >
+                    返回找團
+                  </button>
+                </div>
+
+                {/* 版權標示 */}
+                <div className="text-center text-slate-500 text-xs pt-4">
+                  made by IG:hu._escaperoom
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 
