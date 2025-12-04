@@ -1,0 +1,10 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+
+# Sitemap
+Sitemap: https://xiaomihu.tw/sitemap.xml
+
+# Disallow admin or API routes if any
+Disallow: /api/
+
