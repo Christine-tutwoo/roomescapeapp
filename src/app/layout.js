@@ -39,9 +39,12 @@ export const metadata = {
   creator: "小迷糊密室逃脫",
   publisher: "小迷糊密室逃脫",
   icons: {
-    icon: '/logo.png',
+    icon: [
+      { url: '/favicon.ico', type: 'image/x-icon' },
+      { url: '/logo.png', type: 'image/png', sizes: '512x512' },
+    ],
     apple: '/logo.png',
-    shortcut: '/logo.png',
+    shortcut: '/favicon.ico',
   },
   manifest: '/manifest.json',
   openGraph: {
