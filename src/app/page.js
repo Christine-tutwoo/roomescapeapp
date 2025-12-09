@@ -1754,9 +1754,17 @@ ${url}
     }
   };
 
+  const getEventById = (id) => {
+    if (!id) return null;
+    const localMatch = events.find(e => e.id === id);
+    if (localMatch) return localMatch;
+    if (sharedEvent && sharedEvent.id === id) return sharedEvent;
+    return null;
+  };
+
   const promptJoin = (id) => {
     if (user?.flakeCount >= 3) { showToast("帳號受限。", "error"); return; }
-    const targetEvent = events.find(e => e.id === id);
+    const targetEvent = getEventById(id);
     if (!targetEvent) return;
     runWithIdentity('join', () => {
       const contactHint = targetEvent.contactLineId
@@ -1774,7 +1782,7 @@ ${url}
 
   const handleWithdrawPendingRequest = async (eventId) => {
     if (!user) return;
-    const targetEvent = events.find(e => e.id === eventId);
+    const targetEvent = getEventById(eventId);
     if (!targetEvent) return;
 
     const pendingList = Array.isArray(targetEvent.pendingApprovals) ? [...targetEvent.pendingApprovals] : [];
@@ -1797,7 +1805,7 @@ ${url}
 
   const handleHostApprovalAction = async (eventId, requestId, decision) => {
     if (!user) return;
-    const targetEvent = events.find(e => e.id === eventId);
+    const targetEvent = getEventById(eventId);
     if (!targetEvent) return;
     if (targetEvent.hostUid !== user.uid) {
         showToast("僅主揪可操作審核", "error");
@@ -2140,7 +2148,7 @@ ${url}
     const { eventId, action } = confirmModal;
     
     if (action === 'confirmFlake') {
-        const event = events.find(e => e.id === eventId);
+        const event = getEventById(eventId);
         if (!event || !event.pendingFlake) return;
         const { targetUid } = event.pendingFlake;
 
@@ -2178,7 +2186,7 @@ ${url}
     }
     
     if (action === 'join') {
-        const targetEvent = events.find(e => e.id === eventId);
+        const targetEvent = getEventById(eventId);
         if (!targetEvent) return;
 
         try {
@@ -2208,7 +2216,9 @@ ${url}
                         uid: user.uid,
                         displayName: user.displayName || "匿名玩家",
                         communityNickname: user.communityNickname || "",
-                        requestedAt: Date.now()
+                        requestedAt: Date.now(),
+                        includeSelf: true,
+                        guestNames: []
                     };
                     pendingList.push(requestPayload);
                     await updateDoc(eventRef, {
@@ -2224,7 +2234,7 @@ ${url}
         }
     } else if (action === 'cancel') {
       const isWaitlisted = myWaitlists.includes(eventId);
-      const targetEvent = events.find(e => e.id === eventId);
+      const targetEvent = getEventById(eventId);
       
       try {
         const eventRef = doc(db, "events", eventId);
@@ -4536,7 +4546,7 @@ ${url}
 
       {/* Guest Join Modal */}
       {showGuestModal && (() => {
-        const targetEvent = events.find(e => e.id === guestEventId);
+        const targetEvent = getEventById(guestEventId);
         const options = guestSessionOptions.length > 0 ? guestSessionOptions : [{
             id: 'main',
             label: targetEvent ? `主場：${targetEvent.title}` : '主場',
