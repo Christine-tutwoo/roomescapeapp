@@ -217,6 +217,7 @@ const [user, setUser] = useState(VISITOR_USER);
   // 為了最小化改動，我們先保留狀態，但透過 useEffect 同步。
   const [myEvents, setMyEvents] = useState([]); 
   const [myWaitlists, setMyWaitlists] = useState([]); 
+  const [myPendingApprovals, setMyPendingApprovals] = useState([]);
   
   // --- 篩選狀態 ---
   const [filterCategory, setFilterCategory] = useState('All'); // 新增類別篩選
@@ -601,18 +602,29 @@ useEffect(() => {
     if (user && events.length > 0) {
       const joined = [];
       const waiting = [];
+      const pending = [];
       events.forEach(ev => {
         const isParticipant = ev.participants && ev.participants.includes(user.uid);
         const hasGuestRecord = ev.guests?.some(g => g.addedByUid === user.uid);
+        const pendingApprovals = Array.isArray(ev.pendingApprovals) ? ev.pendingApprovals : [];
+        const isPending = pendingApprovals.some(req => req.uid === user.uid);
         if (isParticipant || hasGuestRecord) {
           joined.push(ev.id);
         }
         if (ev.waitlist && ev.waitlist.includes(user.uid)) {
             waiting.push(ev.id);
         }
+        if (isPending) {
+          pending.push(ev.id);
+        }
       });
       setMyEvents(joined);
       setMyWaitlists(waiting);
+      setMyPendingApprovals(pending);
+    } else {
+      setMyEvents([]);
+      setMyWaitlists([]);
+      setMyPendingApprovals([]);
     }
   }, [user, events]);
 
@@ -632,6 +644,7 @@ useEffect(() => {
     setActiveTab('lobby');
     setMyEvents([]);
     setMyWaitlists([]);
+    setMyPendingApprovals([]);
         showToast("已登出", "success");
     } catch (error) {
         console.error("Logout failed", error);
@@ -914,6 +927,7 @@ ${url}
     const [participants, setParticipants] = useState([]);
     const [waitlist, setWaitlist] = useState([]);
     const [guestList, setGuestList] = useState([]);
+    const [pendingList, setPendingList] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -935,6 +949,7 @@ ${url}
                 setParticipants(pSnaps.map(s => s.exists() ? s.data() : { uid: s.id, displayName: '未知使用者' }));
                 setWaitlist(wSnaps.map(s => s.exists() ? s.data() : { uid: s.id, displayName: '未知使用者' }));
                 setGuestList(latestEvent.guests || managingEvent.guests || []);
+                setPendingList(latestEvent.pendingApprovals || managingEvent.pendingApprovals || []);
             } catch (err) {
                 console.error("Error fetching users:", err);
             } finally {
@@ -1102,6 +1117,60 @@ ${url}
                             ))}
                         </div>
                     </div>
+
+                    {/* 審核中 */}
+                    {pendingList.length > 0 && (
+                      <div>
+                        <h4 className="text-sky-300 text-sm font-bold mb-3 flex items-center">
+                          <Hourglass size={14} className="mr-1.5"/> 等待審核 ({pendingList.length})
+                        </h4>
+                        <div className="space-y-2">
+                          {pendingList.map(req => {
+                            const requestedDate = (() => {
+                              if (!req.requestedAt) return null;
+                              if (typeof req.requestedAt === 'number') return new Date(req.requestedAt);
+                              if (req.requestedAt?.seconds) return new Date(req.requestedAt.seconds * 1000);
+                              return null;
+                            })();
+                            const timeLabel = requestedDate ? requestedDate.toLocaleString('zh-TW', { hour12: false }) : '';
+                            return (
+                              <div key={req.requestId || req.uid} className="flex flex-col bg-slate-800/50 p-3 rounded-xl border border-slate-700/50 gap-2">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <div className="text-sm font-bold text-white">
+                                      {req.communityNickname || req.displayName || '匿名玩家'}
+                                    </div>
+                                    {!!req.displayName && req.communityNickname && req.displayName !== req.communityNickname && (
+                                      <div className="text-[11px] text-slate-500">Google 名稱：{req.displayName}</div>
+                                    )}
+                                    {timeLabel && <div className="text-[10px] text-slate-500 mt-0.5">{timeLabel}</div>}
+                                  </div>
+                                  {!isHost && req.uid === user?.uid && (
+                                    <span className="text-[11px] text-slate-500">等待主揪審核</span>
+                                  )}
+                                </div>
+                                {isHost && (
+                                  <div className="grid grid-cols-2 gap-2 text-xs font-bold">
+                                    <button
+                                      onClick={() => handleRejectPendingRequest(managingEvent.id, req.requestId)}
+                                      className="py-2 rounded-xl bg-slate-900 text-slate-400 border border-slate-700 hover:text-red-300 hover:border-red-400 transition-colors"
+                                    >
+                                      拒絕
+                                    </button>
+                                    <button
+                                      onClick={() => handleApprovePendingRequest(managingEvent.id, req.requestId)}
+                                      className="py-2 rounded-xl bg-emerald-500/80 text-slate-900 border border-emerald-400 hover:bg-emerald-400 transition-colors"
+                                    >
+                                      同意
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     {/* 攜伴名單 */}
                     <div>
@@ -1672,9 +1741,94 @@ ${url}
     const targetEvent = events.find(e => e.id === id);
     if (!targetEvent) return;
     runWithIdentity('join', () => {
-      setConfirmModal({ show: true, eventId: id, action: 'join', title: targetEvent.title });
+      const contactHint = targetEvent.contactLineId
+        ? `送出申請後請到 LINE 群「${targetEvent.contactLineId}」告知主揪，等待審核通過才算報名成功。`
+        : '送出申請後請到 LINE 群聯絡主揪，等待審核通過才算報名成功。';
+      setConfirmModal({ 
+        show: true, 
+        eventId: id, 
+        action: 'join', 
+        title: targetEvent.title,
+        message: `${contactHint}\n點擊「確認參加」僅送出審核，不會直接佔用名額。`
+      });
     });
   };
+
+  const handleWithdrawPendingRequest = async (eventId) => {
+    if (!user) return;
+    const targetEvent = events.find(e => e.id === eventId);
+    if (!targetEvent) return;
+
+    const pendingList = Array.isArray(targetEvent.pendingApprovals) ? [...targetEvent.pendingApprovals] : [];
+    const updatedPending = pendingList.filter(req => req.uid !== user.uid);
+    if (updatedPending.length === pendingList.length) {
+        showToast("目前沒有待審核申請", "info");
+        return;
+    }
+
+    try {
+        const eventRef = doc(db, "events", eventId);
+        await updateDoc(eventRef, { pendingApprovals: updatedPending });
+        showToast("已取消審核申請", "success");
+        fetchEvents(false);
+    } catch (error) {
+        console.error("Withdraw pending request failed:", error);
+        showToast("取消失敗，請稍後再試", "error");
+    }
+  };
+
+  const handleHostApprovalAction = async (eventId, requestId, decision) => {
+    if (!user) return;
+    const targetEvent = events.find(e => e.id === eventId);
+    if (!targetEvent) return;
+    if (targetEvent.hostUid !== user.uid) {
+        showToast("僅主揪可操作審核", "error");
+        return;
+    }
+
+    const pendingList = Array.isArray(targetEvent.pendingApprovals) ? [...targetEvent.pendingApprovals] : [];
+    const targetRequest = pendingList.find(req => req.requestId === requestId);
+    if (!targetRequest) {
+        showToast("找不到這筆審核申請", "error");
+        return;
+    }
+    const updatedPending = pendingList.filter(req => req.requestId !== requestId);
+    const eventRef = doc(db, "events", eventId);
+
+    try {
+        if (decision === 'approve') {
+            const alreadyParticipant = targetEvent.participants?.includes(targetRequest.uid);
+            const currentSlots = Number(targetEvent.currentSlots || 0);
+            const totalSlots = Number(targetEvent.totalSlots || 0);
+            if (!alreadyParticipant && totalSlots && currentSlots >= totalSlots) {
+                showToast("目前名額已滿，請先釋出座位", "error");
+                return;
+            }
+
+            const newSlots = alreadyParticipant ? currentSlots : currentSlots + 1;
+            const updatePayload = {
+                pendingApprovals: updatedPending,
+            };
+            if (!alreadyParticipant) {
+                updatePayload.participants = arrayUnion(targetRequest.uid);
+                updatePayload.currentSlots = newSlots;
+                updatePayload.isFull = totalSlots ? newSlots >= totalSlots : false;
+            }
+            await updateDoc(eventRef, updatePayload);
+            showToast("已同意加入，記得在 LINE 群回覆對方", "success");
+        } else {
+            await updateDoc(eventRef, { pendingApprovals: updatedPending });
+            showToast("已拒絕此申請", "info");
+        }
+        fetchEvents(false);
+    } catch (error) {
+        console.error("Host approval action failed:", error);
+        showToast("操作失敗，請稍後再試", "error");
+    }
+  };
+
+  const handleApprovePendingRequest = (eventId, requestId) => handleHostApprovalAction(eventId, requestId, 'approve');
+  const handleRejectPendingRequest = (eventId, requestId) => handleHostApprovalAction(eventId, requestId, 'reject');
 
   const fetchHostHistory = async (hostUid) => {
     try {
@@ -1997,13 +2151,30 @@ ${url}
                     fetchEvents(false);
                 }
             } else {
-                const newSlots = targetEvent.currentSlots + 1;
-                await updateDoc(eventRef, {
-                    participants: arrayUnion(user.uid),
-                    currentSlots: newSlots,
-                    isFull: newSlots >= targetEvent.totalSlots
-                });
-                showToast(`報名成功！`, "success");
+                const pendingList = Array.isArray(targetEvent.pendingApprovals) ? [...targetEvent.pendingApprovals] : [];
+                const alreadyPending = pendingList.some(req => req.uid === user.uid);
+                const alreadyJoined = targetEvent.participants?.includes(user.uid);
+                if (alreadyJoined) {
+                    showToast("你已在名單中，無需重複申請", "info");
+                    setConfirmModal({ show: false, eventId: null, action: null });
+                    return;
+                }
+                if (alreadyPending) {
+                    showToast("已送出申請，請到 LINE 群提醒主揪審核", "info");
+                } else {
+                    const requestPayload = {
+                        requestId: generateRandomId(),
+                        uid: user.uid,
+                        displayName: user.displayName || "匿名玩家",
+                        communityNickname: user.communityNickname || "",
+                        requestedAt: Date.now()
+                    };
+                    pendingList.push(requestPayload);
+                    await updateDoc(eventRef, {
+                        pendingApprovals: pendingList
+                    });
+                    showToast("已送出 +1 申請！請到 LINE 群聯絡主揪等候審核。", "info", 5000);
+                }
                 fetchEvents(false);
             }
         } catch (error) {
@@ -2225,6 +2396,7 @@ ${url}
                 participants: [user.uid],
                 waitlist: [],
                 guests: [],
+                pendingApprovals: [],
                 guestRemovalNotices: [],
                 isChainEvent: hasChainSessions,
                 chainSessions: sanitizedChainSessions,
@@ -2706,6 +2878,8 @@ ${url}
               getFilteredEvents().map((ev) => {
                 const isJoined = myEvents.includes(ev.id);
                 const isWaitlisted = myWaitlists.includes(ev.id);
+                const pendingApprovals = Array.isArray(ev.pendingApprovals) ? ev.pendingApprovals : [];
+                const isPendingApproval = pendingApprovals.some(req => req.uid === user?.uid);
                 const freeSlots = getRemainingSlots(ev);
                 const companionAvailable = freeSlots - (isJoined ? 0 : 1) > 0;
                 const locationLink = getMapsUrl(ev.location);
@@ -2720,11 +2894,13 @@ ${url}
                   });
                   return count;
                 })();
-                const joinButtonDisabled = ev.isChainEvent ? false : (isJoined || isWaitlisted);
+                const joinButtonDisabled = ev.isChainEvent ? false : (isJoined || isWaitlisted || isPendingApproval);
                 const joinButtonClass = ev.isChainEvent
                   ? 'bg-purple-500 text-slate-900 hover:bg-purple-400 shadow-lg shadow-purple-500/20 border border-purple-500/30'
                   : isJoined 
                     ? 'bg-slate-800 text-emerald-400 border border-emerald-500/20 cursor-not-allowed' 
+                    : isPendingApproval
+                      ? 'bg-slate-800 text-sky-300 border border-sky-500/20 cursor-not-allowed'
                     : isWaitlisted
                       ? 'bg-slate-800 text-yellow-400 border border-yellow-500/20 cursor-not-allowed'
                       : eventIsFull 
@@ -2960,6 +3136,8 @@ ${url}
                         )
                       ) : isJoined ? (
                         <><CheckCircle size={16} className="mr-2"/> 已參加 (正取)</>
+                      ) : isPendingApproval ? (
+                        <><Hourglass size={16} className="mr-2"/> 等待主揪審核</>
                       ) : isWaitlisted ? (
                         <><Hourglass size={16} className="mr-2"/> 已在候補名單</>
                     ) : eventIsFull ? (
@@ -3682,12 +3860,16 @@ ${url}
                   目前沒有任何行程，快去大廳找團吧！
                 </div>
               ) : (
-                events.filter(e => myEvents.includes(e.id) || myWaitlists.includes(e.id)).map(ev => {
+                events
+                  .filter(e => myEvents.includes(e.id) || myWaitlists.includes(e.id) || myPendingApprovals.includes(e.id))
+                  .map(ev => {
                   const isWaitlisted = myWaitlists.includes(ev.id);
+                  const isPendingJoin = myPendingApprovals.includes(ev.id);
                   const isPastEvent = isEventPast(ev);
                   const guestNotices = (ev.guestRemovalNotices || []).filter(n => n.ownerUid === user.uid);
                   const locationLink = getMapsUrl(ev.location);
                   const isHost = ev.hostUid === user.uid;
+                  const hostPendingRequests = Array.isArray(ev.pendingApprovals) ? ev.pendingApprovals : [];
                   return (
                     <div key={ev.id} className="bg-slate-900 rounded-3xl p-5 border border-slate-800 mb-6 shadow-xl relative overflow-hidden group">
                       {/* 頂部裝飾條 */}
@@ -3699,6 +3881,10 @@ ${url}
                             {isPastEvent ? (
                               <span className="text-xs font-bold bg-slate-500/10 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-500/20 flex items-center">
                                 <Clock size={12} className="mr-1.5" /> 已結團
+                              </span>
+                            ) : isPendingJoin ? (
+                              <span className="text-xs font-bold bg-sky-500/10 text-sky-300 px-2.5 py-1 rounded-lg border border-sky-500/20 flex items-center">
+                                <Hourglass size={12} className="mr-1.5"/> 審核中
                               </span>
                             ) : isWaitlisted ? (
                               <span className="text-xs font-bold bg-yellow-500/10 text-yellow-400 px-2.5 py-1 rounded-lg border border-yellow-500/20 flex items-center">
@@ -3747,6 +3933,11 @@ ${url}
                               <span>{ev.studio}</span>
                             )}
                           </div>
+                          {isPendingJoin && (
+                            <div className="mt-3 p-3 bg-sky-500/10 border border-sky-500/20 rounded-xl text-xs text-sky-100">
+                              已送出 +1 申請，請在 LINE 群提醒主揪審核。未被同意前不會佔用名額。
+                            </div>
+                          )}
                         </div>
                         
                         <div className="flex flex-col gap-2 absolute top-4 right-4 z-20">
@@ -3784,6 +3975,54 @@ ${url}
                                 <Users size={14} />
                                 管理 ({ev.participants.length + (ev.guests?.length || 0)})
                             </button>
+                            {hostPendingRequests.length > 0 && (
+                              <div className="mt-2 p-3 bg-slate-800/40 border border-slate-700/60 rounded-2xl space-y-3">
+                                <div className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                                  <Hourglass size={12} className="text-sky-300" />
+                                  待審核名單（{hostPendingRequests.length}）
+                                </div>
+                                {hostPendingRequests.map(req => {
+                                  const requestedDate = (() => {
+                                    if (!req.requestedAt) return null;
+                                    if (typeof req.requestedAt === 'number') return new Date(req.requestedAt);
+                                    if (req.requestedAt.seconds) return new Date(req.requestedAt.seconds * 1000);
+                                    return null;
+                                  })();
+                                  const requestedTime = requestedDate
+                                    ? requestedDate.toLocaleString('zh-TW', { hour12: false })
+                                    : '';
+                                  return (
+                                    <div key={req.requestId || req.uid} className="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3 flex flex-col gap-2">
+                                      <div className="flex items-center justify-between">
+                                        <div>
+                                          <div className="text-sm font-bold text-white">{req.communityNickname || req.displayName || '匿名玩家'}</div>
+                                          <div className="text-[11px] text-slate-500">
+                                            {req.displayName && req.communityNickname && req.displayName !== req.communityNickname ? `Google 名稱：${req.displayName}` : req.displayName || ''}
+                                          </div>
+                                        </div>
+                                        {requestedTime && (
+                                          <span className="text-[10px] text-slate-500">{requestedTime}</span>
+                                        )}
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2 text-xs font-bold">
+                                        <button
+                                          onClick={() => handleRejectPendingRequest(ev.id, req.requestId)}
+                                          className="py-2 rounded-xl bg-slate-900 text-slate-400 border border-slate-700 hover:text-red-300 hover:border-red-400 transition-colors"
+                                        >
+                                          拒絕
+                                        </button>
+                                        <button
+                                          onClick={() => handleApprovePendingRequest(ev.id, req.requestId)}
+                                          className="py-2 rounded-xl bg-emerald-500/80 text-slate-900 border border-emerald-400 hover:bg-emerald-400 transition-colors"
+                                        >
+                                          同意
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -3949,30 +4188,40 @@ ${url}
                           查看已參加成員
                       </button>
 
-                      <button 
-                        disabled={isHost}
-                        onClick={() => {
-                            if (isHost) {
-                                showToast("主揪請使用垃圾桶按鈕關團，無法自行跳車", "info");
-                                return;
-                            }
-                            promptCancel(ev.id);
-                        }} 
-                        className={`w-full py-3 rounded-xl text-sm font-bold flex items-center justify-center border transition-all active:scale-95
-                          ${isHost
-                            ? 'bg-slate-900 text-slate-500 border-slate-800 cursor-not-allowed'
-                            : isWaitlisted 
-                              ? 'bg-slate-900 text-slate-500 border-slate-800 hover:bg-slate-800 hover:text-slate-300' 
-                              : 'bg-red-500/5 text-red-400 border-red-500/10 hover:bg-red-500/10'}`}
-                      >
-                        {isHost ? (
-                          <> <Ban size={16} className="mr-2" /> 主揪請用垃圾桶關團 </>
-                        ) : isWaitlisted ? (
-                          <> <X size={16} className="mr-2" /> 取消候補申請</>
-                        ) : (
-                          <> <LogOut size={16} className="mr-2" /> 退出此揪團 (跳車)</>
-                        )}
-                      </button>
+                      {isPendingJoin ? (
+                        <button
+                          onClick={() => handleWithdrawPendingRequest(ev.id)}
+                          className="w-full py-3 rounded-xl text-sm font-bold flex items-center justify-center border border-sky-500/30 text-sky-200 bg-slate-900 hover:bg-slate-800 active:scale-95 transition-all"
+                        >
+                          <X size={16} className="mr-2" />
+                          取消審核申請
+                        </button>
+                      ) : (
+                        <button 
+                          disabled={isHost}
+                          onClick={() => {
+                              if (isHost) {
+                                  showToast("主揪請使用垃圾桶按鈕關團，無法自行跳車", "info");
+                                  return;
+                              }
+                              promptCancel(ev.id);
+                          }} 
+                          className={`w-full py-3 rounded-xl text-sm font-bold flex items-center justify-center border transition-all active:scale-95
+                            ${isHost
+                              ? 'bg-slate-900 text-slate-500 border-slate-800 cursor-not-allowed'
+                              : isWaitlisted 
+                                ? 'bg-slate-900 text-slate-500 border-slate-800 hover:bg-slate-800 hover:text-slate-300' 
+                                : 'bg-red-500/5 text-red-400 border-red-500/10 hover:bg-red-500/10'}`}
+                        >
+                          {isHost ? (
+                            <> <Ban size={16} className="mr-2" /> 主揪請用垃圾桶關團 </>
+                          ) : isWaitlisted ? (
+                            <> <X size={16} className="mr-2" /> 取消候補申請</>
+                          ) : (
+                            <> <LogOut size={16} className="mr-2" /> 退出此揪團 (跳車)</>
+                          )}
+                        </button>
+                      )}
                     </div>
                   );
                 })
