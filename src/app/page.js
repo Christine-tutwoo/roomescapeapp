@@ -1133,6 +1133,8 @@ ${url}
                               return null;
                             })();
                             const timeLabel = requestedDate ? requestedDate.toLocaleString('zh-TW', { hour12: false }) : '';
+                            const guestNames = (req.guestNames || []).filter(Boolean);
+                            const needSelfApproval = !!req.includeSelf && !(managingEvent.participants || []).includes(req.uid);
                             return (
                               <div key={req.requestId || req.uid} className="flex flex-col bg-slate-800/50 p-3 rounded-xl border border-slate-700/50 gap-2">
                                 <div className="flex items-center justify-between">
@@ -1144,11 +1146,27 @@ ${url}
                                       <div className="text-[11px] text-slate-500">Google 名稱：{req.displayName}</div>
                                     )}
                                     {timeLabel && <div className="text-[10px] text-slate-500 mt-0.5">{timeLabel}</div>}
+                                    {needSelfApproval && (
+                                      <div className="text-[11px] text-emerald-300 font-semibold mt-0.5">本人待審核</div>
+                                    )}
+                                    {guestNames.length > 0 && (
+                                      <div className="text-[11px] text-slate-400 mt-1">
+                                        攜伴：{guestNames.join('、')}
+                                      </div>
+                                    )}
                                   </div>
                                   {!isHost && req.uid === user?.uid && (
                                     <span className="text-[11px] text-slate-500">等待主揪審核</span>
                                   )}
                                 </div>
+                                {req.uid === user?.uid && (
+                                  <button
+                                    onClick={() => handleWithdrawPendingRequest(managingEvent.id)}
+                                    className="w-full text-[11px] text-slate-400 underline underline-offset-2 hover:text-white transition-colors"
+                                  >
+                                    取消這筆申請
+                                  </button>
+                                )}
                                 {isHost && (
                                   <div className="grid grid-cols-2 gap-2 text-xs font-bold">
                                     <button
@@ -1798,22 +1816,46 @@ ${url}
     try {
         if (decision === 'approve') {
             const alreadyParticipant = targetEvent.participants?.includes(targetRequest.uid);
+            const includeSelf = !!targetRequest.includeSelf;
+            const guestNames = Array.isArray(targetRequest.guestNames) ? targetRequest.guestNames.filter(Boolean) : [];
             const currentSlots = Number(targetEvent.currentSlots || 0);
             const totalSlots = Number(targetEvent.totalSlots || 0);
-            if (!alreadyParticipant && totalSlots && currentSlots >= totalSlots) {
-                showToast("目前名額已滿，請先釋出座位", "error");
+            let slotsNeeded = guestNames.length;
+            const shouldAddSelf = includeSelf && !alreadyParticipant;
+            if (shouldAddSelf) slotsNeeded += 1;
+
+            if (totalSlots && currentSlots + slotsNeeded > totalSlots) {
+                showToast("名額不足，請先釋出座位", "error");
                 return;
             }
 
-            const newSlots = alreadyParticipant ? currentSlots : currentSlots + 1;
+            let newSlots = currentSlots;
             const updatePayload = {
                 pendingApprovals: updatedPending,
             };
-            if (!alreadyParticipant) {
+
+            if (shouldAddSelf) {
                 updatePayload.participants = arrayUnion(targetRequest.uid);
+                newSlots += 1;
+            }
+
+            if (guestNames.length > 0) {
+                const newGuests = guestNames.map(name => ({
+                    id: generateRandomId(),
+                    addedByUid: targetRequest.uid,
+                    addedByName: targetRequest.communityNickname || targetRequest.displayName || "團員",
+                    name,
+                    addedAt: Date.now()
+                }));
+                updatePayload.guests = arrayUnion(...newGuests);
+                newSlots += guestNames.length;
+            }
+
+            if (slotsNeeded > 0) {
                 updatePayload.currentSlots = newSlots;
                 updatePayload.isFull = totalSlots ? newSlots >= totalSlots : false;
             }
+
             await updateDoc(eventRef, updatePayload);
             showToast("已同意加入，記得在 LINE 群回覆對方", "success");
         } else {
@@ -1943,43 +1985,42 @@ ${url}
     }
     
     try {
-        const targetEvent = events.find(e => e.id === guestEventId);
-        if (!targetEvent) return;
-
         const eventRef = doc(db, "events", guestEventId);
-        
-        // 準備要加入的 guests 陣列
-        const newGuests = validGuests.map(name => ({
-            id: generateRandomId(),
-            addedByUid: user.uid,
-            addedByName: user.displayName || "團員",
-            name: name.trim(),
-            addedAt: Date.now()
-        }));
-
-        const alreadyJoined = targetEvent.participants?.includes(user.uid);
-        const totalNeeded = validGuests.length + (alreadyJoined ? 0 : 1);
-        if (targetEvent.currentSlots + totalNeeded > targetEvent.totalSlots) {
-            const remaining = Math.max(targetEvent.totalSlots - targetEvent.currentSlots - (alreadyJoined ? 0 : 1), 0);
-            showToast(remaining > 0 
-                ? `名額不足，只能再帶 ${remaining} 位朋友` 
-                : "名額不足，請先確認剩餘空位", "error");
+        const eventSnap = await getDoc(eventRef);
+        if (!eventSnap.exists()) {
+            showToast("活動不存在或已被刪除", "error");
             return;
         }
-        const newSlots = targetEvent.currentSlots + totalNeeded;
-        const updatePayload = {
-            currentSlots: newSlots,
-            isFull: newSlots >= targetEvent.totalSlots,
-            guests: arrayUnion(...newGuests)
-        };
-        if (!alreadyJoined) {
-            updatePayload.participants = arrayUnion(user.uid);
+        const eventData = eventSnap.data();
+        const pendingList = Array.isArray(eventData.pendingApprovals) ? [...eventData.pendingApprovals] : [];
+        const timestamp = Date.now();
+        const requestIndex = pendingList.findIndex(req => req.uid === user.uid);
+
+        if (requestIndex >= 0) {
+            const existing = pendingList[requestIndex];
+            const mergedGuests = Array.from(new Set([...(existing.guestNames || []), ...validGuests]));
+            pendingList[requestIndex] = {
+                ...existing,
+                guestNames: mergedGuests,
+                requestedAt: timestamp,
+                includeSelf: existing.includeSelf || false
+            };
+        } else {
+            pendingList.push({
+                requestId: generateRandomId(),
+                uid: user.uid,
+                displayName: user.displayName || "團員",
+                communityNickname: user.communityNickname || "",
+                requestedAt: timestamp,
+                includeSelf: false,
+                guestNames: validGuests
+            });
         }
-        await updateDoc(eventRef, updatePayload);
-        
-        showToast(`已幫 ${validGuests.join('、')} 報名成功！`, "success");
+
+        await updateDoc(eventRef, { pendingApprovals: pendingList });
+        showToast(`攜伴申請已送出！請在 LINE 群通知主揪審核。`, "info", 5000);
         closeGuestModal();
-        fetchEvents(false); // Refresh
+        fetchEvents(false);
     } catch (error) {
         console.error("Error adding guests:", error);
         showToast("攜伴失敗: " + error.message, "error");
@@ -3974,55 +4015,13 @@ ${url}
                             >
                                 <Users size={14} />
                                 管理 ({ev.participants.length + (ev.guests?.length || 0)})
+                                {hostPendingRequests.length > 0 && (
+                                  <span className="ml-2 px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-200 text-[10px] flex items-center gap-1">
+                                    <Hourglass size={10} />
+                                    {hostPendingRequests.length}
+                                  </span>
+                                )}
                             </button>
-                            {hostPendingRequests.length > 0 && (
-                              <div className="mt-2 p-3 bg-slate-800/40 border border-slate-700/60 rounded-2xl space-y-3">
-                                <div className="text-xs font-semibold text-slate-300 flex items-center gap-2">
-                                  <Hourglass size={12} className="text-sky-300" />
-                                  待審核名單（{hostPendingRequests.length}）
-                                </div>
-                                {hostPendingRequests.map(req => {
-                                  const requestedDate = (() => {
-                                    if (!req.requestedAt) return null;
-                                    if (typeof req.requestedAt === 'number') return new Date(req.requestedAt);
-                                    if (req.requestedAt.seconds) return new Date(req.requestedAt.seconds * 1000);
-                                    return null;
-                                  })();
-                                  const requestedTime = requestedDate
-                                    ? requestedDate.toLocaleString('zh-TW', { hour12: false })
-                                    : '';
-                                  return (
-                                    <div key={req.requestId || req.uid} className="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3 flex flex-col gap-2">
-                                      <div className="flex items-center justify-between">
-                                        <div>
-                                          <div className="text-sm font-bold text-white">{req.communityNickname || req.displayName || '匿名玩家'}</div>
-                                          <div className="text-[11px] text-slate-500">
-                                            {req.displayName && req.communityNickname && req.displayName !== req.communityNickname ? `Google 名稱：${req.displayName}` : req.displayName || ''}
-                                          </div>
-                                        </div>
-                                        {requestedTime && (
-                                          <span className="text-[10px] text-slate-500">{requestedTime}</span>
-                                        )}
-                                      </div>
-                                      <div className="grid grid-cols-2 gap-2 text-xs font-bold">
-                                        <button
-                                          onClick={() => handleRejectPendingRequest(ev.id, req.requestId)}
-                                          className="py-2 rounded-xl bg-slate-900 text-slate-400 border border-slate-700 hover:text-red-300 hover:border-red-400 transition-colors"
-                                        >
-                                          拒絕
-                                        </button>
-                                        <button
-                                          onClick={() => handleApprovePendingRequest(ev.id, req.requestId)}
-                                          className="py-2 rounded-xl bg-emerald-500/80 text-slate-900 border border-emerald-400 hover:bg-emerald-400 transition-colors"
-                                        >
-                                          同意
-                                        </button>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
                           </div>
                         )}
                       </div>
