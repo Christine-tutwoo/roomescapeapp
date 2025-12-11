@@ -237,6 +237,7 @@ const [user, setUser] = useState(VISITOR_USER);
   const [viewingHostName, setViewingHostName] = useState(""); // 查看主揪檔案的名稱
   const [viewingHostPhotoURL, setViewingHostPhotoURL] = useState(null); // 查看主揪的頭貼
   const [hostHistoryEvents, setHostHistoryEvents] = useState([]); // 主揪的歷史活動
+  const [hostProfiles, setHostProfiles] = useState({});
   const [showCalendar, setShowCalendar] = useState(false);
   const [searchQuery, setSearchQuery] = useState(''); // 新增搜尋狀態
 
@@ -257,6 +258,17 @@ const [user, setUser] = useState(VISITOR_USER);
   const [profileName, setProfileName] = useState("");
 
 const [formData, setFormData] = useState(getDefaultFormData());
+
+  const getHostDisplayName = (target) => {
+    if (!target) return "主揪";
+    const uid = typeof target === 'string' ? target : target.hostUid;
+    const profile = uid ? hostProfiles[uid] : null;
+    if (profile?.displayName) return profile.displayName;
+    if (typeof target === 'object' && target !== null && target.host) {
+      return target.host;
+    }
+    return "主揪";
+  };
   const [createMode, setCreateMode] = useState('event'); // 'event' or 'wish'
 const [guestNames, setGuestNames] = useState([""]); // 攜伴姓名列表
 const [showGuestModal, setShowGuestModal] = useState(false); // 攜伴輸入框
@@ -572,15 +584,61 @@ const handleIdentityGroupConfirm = () => {
   }, []);
 
   useEffect(() => {
+    if (!events.length) return;
+    const uniqueHostUids = Array.from(new Set(events.map(ev => ev.hostUid).filter(Boolean)));
+    const missing = uniqueHostUids.filter(uid => !hostProfiles[uid]);
+    if (missing.length === 0) return;
+
+    let isCancelled = false;
+    const fetchHostProfiles = async () => {
+      const updates = {};
+      await Promise.all(missing.map(async (uid) => {
+        try {
+          const snap = await getDoc(doc(db, "users", uid));
+          if (snap.exists()) {
+            const data = snap.data();
+            updates[uid] = {
+              displayName: data.communityNickname || data.displayName || "主揪",
+              communityNickname: data.communityNickname || "",
+              googleDisplayName: data.displayName || "",
+              photoURL: data.photoURL || null
+            };
+          } else {
+            updates[uid] = {
+              displayName: "主揪",
+              communityNickname: "",
+              googleDisplayName: "",
+              photoURL: null
+            };
+          }
+        } catch (error) {
+          console.error("Error fetching host profile:", error);
+        }
+      }));
+      if (!isCancelled && Object.keys(updates).length > 0) {
+        setHostProfiles(prev => ({ ...prev, ...updates }));
+      }
+    };
+
+    fetchHostProfiles();
+    return () => { isCancelled = true; };
+  }, [events, hostProfiles]);
+
+  useEffect(() => {
     if (!filterHostUid) {
         setFilterHostName("");
+        return;
+    }
+    const profileName = hostProfiles[filterHostUid]?.displayName;
+    if (profileName) {
+        setFilterHostName(profileName);
         return;
     }
     const hostEvent = events.find(ev => ev.hostUid === filterHostUid);
     if (hostEvent) {
         setFilterHostName(hostEvent.host || "");
     }
-  }, [filterHostUid, events]);
+  }, [filterHostUid, events, hostProfiles]);
 
   useEffect(() => {
     if (guestSessionOptions.length > 0) {
@@ -667,7 +725,7 @@ useEffect(() => {
         if (!ev.hostUid) return;
         if (!stats[ev.hostUid]) {
             stats[ev.hostUid] = {
-                name: ev.host || "主揪",
+                name: hostProfiles[ev.hostUid]?.displayName || ev.host || "主揪",
                 count: 0,
                 active: 0,
                 missing: 0
@@ -678,7 +736,7 @@ useEffect(() => {
         if (getRemainingSlots(ev) > 0) stats[ev.hostUid].missing += 1;
     });
     return stats;
-  }, [events]);
+  }, [events, hostProfiles]);
 
   const myWishes = useMemo(() => {
     if (!user) return [];
@@ -945,9 +1003,21 @@ ${url}
                 const wPromises = waitlistUids.map(uid => getDoc(doc(db, "users", uid)));
                 
                 const [pSnaps, wSnaps] = await Promise.all([Promise.all(pPromises), Promise.all(wPromises)]);
+
+                const normalizeUserDoc = (snap) => {
+                    if (!snap.exists()) return { uid: snap.id, displayName: '未知使用者' };
+                    const data = snap.data();
+                    const preferredName = data.communityNickname || data.displayName || "未命名玩家";
+                    return {
+                        ...data,
+                        uid: snap.id,
+                        googleDisplayName: data.displayName || "",
+                        displayName: preferredName
+                    };
+                };
                 
-                setParticipants(pSnaps.map(s => s.exists() ? s.data() : { uid: s.id, displayName: '未知使用者' }));
-                setWaitlist(wSnaps.map(s => s.exists() ? s.data() : { uid: s.id, displayName: '未知使用者' }));
+                setParticipants(pSnaps.map(normalizeUserDoc));
+                setWaitlist(wSnaps.map(normalizeUserDoc));
                 setGuestList(latestEvent.guests || managingEvent.guests || []);
                 setPendingList(latestEvent.pendingApprovals || managingEvent.pendingApprovals || []);
             } catch (err) {
@@ -1499,7 +1569,7 @@ ${url}
     const startTime = formatDateTime(startDate);
     const endTime = formatDateTime(endDate);
     
-    const details = `主揪: ${ev.host}\n地點: ${ev.location}\n備註: ${ev.description || '無'}\n遊玩時長: ${durationMinutes} 分鐘`;
+    const details = `主揪: ${getHostDisplayName(ev)}\n地點: ${ev.location}\n備註: ${ev.description || '無'}\n遊玩時長: ${durationMinutes} 分鐘`;
     const url = `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(ev.title)}&dates=${startTime}/${endTime}&details=${encodeURIComponent(details)}&location=${encodeURIComponent(ev.location)}`;
     
     window.open(url, '_blank');
@@ -1913,7 +1983,8 @@ ${url}
   const handleViewHostProfile = async (uid, name) => {
     if (!uid) return;
     setViewingHostUid(uid);
-    setViewingHostName(name || hostStats[uid]?.name || "");
+    const fallbackName = name || hostStats[uid]?.name || "";
+    setViewingHostName(getHostDisplayName({ hostUid: uid, host: fallbackName }));
     setFilterEventId(null);
     setFilterWishId(null);
     
@@ -2659,9 +2730,17 @@ ${url}
               alt="小迷糊 Logo" 
               className="w-8 h-8 rounded-full object-cover shrink-0"
             />
-            <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent truncate">
-              小迷糊密室逃脫揪團平台
-          </h1>
+            <div className="flex items-center gap-2 min-w-0">
+              <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent truncate">
+                小迷糊密室逃脫揪團平台
+              </h1>
+              <a
+                href="/privacy"
+                className="text-xs font-semibold text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded-lg whitespace-nowrap hover:text-white hover:border-emerald-300"
+              >
+                隱私條款
+              </a>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <a
@@ -2945,6 +3024,7 @@ ${url}
                   });
                   return count;
                 })();
+                const hostName = getHostDisplayName(ev);
                 const joinButtonDisabled = ev.isChainEvent ? false : (isJoined || isWaitlisted || isPendingApproval);
                 const joinButtonClass = ev.isChainEvent
                   ? 'bg-purple-500 text-slate-900 hover:bg-purple-400 shadow-lg shadow-purple-500/20 border border-purple-500/30'
@@ -2987,10 +3067,10 @@ ${url}
                         
                         <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
                           <button 
-                            onClick={() => handleViewHostProfile(ev.hostUid, ev.host)}
+                            onClick={() => handleViewHostProfile(ev.hostUid, hostName)}
                             className="text-emerald-300 hover:text-emerald-200 font-semibold flex items-center gap-1"
                           >
-                            {ev.host || '神秘主揪'}
+                            {hostName}
                             <Sparkles size={12} />
                           </button>
                           <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[10px] text-slate-300">
@@ -3921,6 +4001,7 @@ ${url}
                   const locationLink = getMapsUrl(ev.location);
                   const isHost = ev.hostUid === user.uid;
                   const hostPendingRequests = Array.isArray(ev.pendingApprovals) ? ev.pendingApprovals : [];
+                  const hostName = getHostDisplayName(ev);
                   return (
                     <div key={ev.id} className="bg-slate-900 rounded-3xl p-5 border border-slate-800 mb-6 shadow-xl relative overflow-hidden group">
                       {/* 頂部裝飾條 */}
@@ -3959,10 +4040,10 @@ ${url}
                           <h3 className="text-xl font-bold text-white mb-1.5 leading-tight">{ev.title}</h3>
                           <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
                             <button 
-                              onClick={() => handleViewHostProfile(ev.hostUid, ev.host)}
+                              onClick={() => handleViewHostProfile(ev.hostUid, hostName)}
                               className="text-emerald-300 hover:text-emerald-200 font-semibold flex items-center gap-1"
                             >
-                              {ev.host || '神秘主揪'}
+                              {hostName}
                               <Sparkles size={12} />
                             </button>
                             <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[10px] text-slate-300">
