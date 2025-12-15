@@ -63,6 +63,8 @@ export const metadata = {
       {
         // 使用既有檔案，避免 OG 圖檔路徑 404
         url: '/logo.png',
+        width: 512,
+        height: 512,
         alt: '小迷糊密室逃脫揪團平台',
       },
     ],
@@ -96,31 +98,74 @@ export const metadata = {
 };
 
 // JSON-LD 結構化數據
-const jsonLd = {
-  '@context': 'https://schema.org',
-  '@type': 'WebApplication',
-  name: '小迷糊密室逃脫揪團平台',
-  description:
-    '小迷糊是為台灣密室逃脫玩家打造的揪團平台：一鍵開團與報名、即時招募隊友、名額/候補/攜伴管理、場次資訊整理與主揪審核；還有密室玩家人格測驗、許願池與工作室優惠情報，並支援多條件篩選與分享邀請，讓你快速找到同好、安心出發不孤單。',
-  url: siteUrl,
-  applicationCategory: 'Entertainment',
-  operatingSystem: 'Web Browser',
-  offers: {
-    '@type': 'Offer',
-    price: '0',
-    priceCurrency: 'TWD',
+const logoUrl = `${siteUrl}/logo.png`;
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebApplication',
+    name: '小迷糊密室逃脫揪團平台',
+    description:
+      '小迷糊是為台灣密室逃脫玩家打造的揪團平台：一鍵開團與報名、即時招募隊友、名額/候補/攜伴管理、場次資訊整理與主揪審核；還有密室玩家人格測驗、許願池與工作室優惠情報，並支援多條件篩選與分享邀請，讓你快速找到同好、安心出發不孤單。',
+    url: siteUrl,
+    image: logoUrl,
+    applicationCategory: 'Entertainment',
+    operatingSystem: 'Web Browser',
+    offers: {
+      '@type': 'Offer',
+      price: '0',
+      priceCurrency: 'TWD',
+    },
+    aggregateRating: {
+      '@type': 'AggregateRating',
+      ratingValue: '4.8',
+      ratingCount: '150',
+    },
+    author: {
+      '@type': 'Organization',
+      name: '小迷糊密室逃脫',
+      url: 'https://www.instagram.com/hu._escaperoom',
+      logo: {
+        '@type': 'ImageObject',
+        url: logoUrl,
+        width: 512,
+        height: 512,
+      },
+    },
   },
-  aggregateRating: {
-    '@type': 'AggregateRating',
-    ratingValue: '4.8',
-    ratingCount: '150',
-  },
-  author: {
+  {
+    '@context': 'https://schema.org',
     '@type': 'Organization',
     name: '小迷糊密室逃脫',
-    url: 'https://www.instagram.com/hu._escaperoom',
+    url: siteUrl,
+    logo: {
+      '@type': 'ImageObject',
+      url: logoUrl,
+      width: 512,
+      height: 512,
+    },
+    image: logoUrl,
+    sameAs: [
+      'https://www.instagram.com/hu._escaperoom',
+      'https://linktr.ee/hu._escaperoom',
+    ],
   },
-};
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: '小迷糊密室逃脫揪團平台',
+    url: siteUrl,
+    publisher: {
+      '@type': 'Organization',
+      name: '小迷糊密室逃脫',
+      logo: {
+        '@type': 'ImageObject',
+        url: logoUrl,
+        width: 512,
+        height: 512,
+      },
+    },
+  },
+];
 
 export default function RootLayout({ children }) {
   return (
