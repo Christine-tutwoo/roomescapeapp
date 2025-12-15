@@ -13,14 +13,14 @@
     "firebase-admin": "^13.6.0",
     "html2canvas": "^1.4.1",
     "lucide-react": "^0.555.0",
-    "next": "16.0.7",
-    "react": "19.2.1",
-    "react-dom": "19.2.1"
+    "next": "^16.0.10",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "eslint": "^9",
-    "eslint-config-next": "16.0.7",
+    "eslint-config-next": "^16.0.10",
     "icojs": "^0.20.1",
     "jimp": "^1.6.0",
     "png-to-ico": "^3.0.1",
