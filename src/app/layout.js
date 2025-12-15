@@ -12,15 +12,19 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://xiaomihu.tw';
+// NOTE: 預設網域用正式站（避免 Canonical/JSON-LD 指向錯誤網域）
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://xiaomihu-escaperoom.com';
 
 export const metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "小迷糊密室逃脫揪團平台 | 找密室玩家一起逃脫",
+    // 讓標題長度更貼近 SEO 建議（30+ 字元）
+    default: "小迷糊密室逃脫揪團平台｜找隊友揪團、人格測驗、活動管理一次搞定",
     template: "%s | 小迷糊密室逃脫揪團",
   },
-  description: "台灣最懂密室玩家的揪團神器！快速找到志同道合的密室夥伴，一起挑戰各種主題密室逃脫。支援即時揪團、人格測驗、活動管理，讓每次密室體驗都不孤單。",
+  // 讓描述長度更貼近 SEO 建議（120+ 字元）
+  description:
+    "小迷糊是為台灣密室逃脫玩家打造的揪團平台：一鍵開團與報名、即時招募隊友、名額/候補/攜伴管理、場次資訊整理與主揪審核；還有密室玩家人格測驗、許願池與工作室優惠情報，讓你快速找到同好、安心出發不孤單。支援全台地區/工作室/月份/費用篩選與搜尋，並可用分享連結邀請朋友，讓每場密室更快成團。",
   keywords: [
     "密室逃脫",
     "揪團",
@@ -52,22 +56,23 @@ export const metadata = {
     locale: 'zh_TW',
     url: siteUrl,
     siteName: '小迷糊密室逃脫揪團平台',
-    title: '小迷糊密室逃脫揪團平台 | 找密室玩家一起逃脫',
-    description: '台灣最懂密室玩家的揪團神器！快速找到志同道合的密室夥伴，一起挑戰各種主題密室逃脫。',
+    title: '小迷糊密室逃脫揪團平台｜找隊友揪團、人格測驗、活動管理一次搞定',
+    description:
+      '小迷糊是為台灣密室逃脫玩家打造的揪團平台：一鍵開團與報名、即時招募隊友、名額/候補/攜伴管理、場次資訊整理與主揪審核；再加上人格測驗、許願池與工作室優惠情報，並支援多條件篩選與分享邀請，揪團更輕鬆。',
     images: [
       {
-        url: '/og-image.png',
-        width: 1200,
-        height: 630,
+        // 使用既有檔案，避免 OG 圖檔路徑 404
+        url: '/logo.png',
         alt: '小迷糊密室逃脫揪團平台',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: '小迷糊密室逃脫揪團平台 | 找密室玩家一起逃脫',
-    description: '台灣最懂密室玩家的揪團神器！快速找到志同道合的密室夥伴。',
-    images: ['/og-image.png'],
+    title: '小迷糊密室逃脫揪團平台｜找隊友揪團、人格測驗、活動管理一次搞定',
+    description:
+      '一鍵開團與報名、即時招募隊友、名額/候補/攜伴管理、場次資訊整理與主揪審核；再加上人格測驗、許願池與工作室優惠情報，支援多條件篩選與分享邀請，讓你快速找到同好、安心出發不孤單。',
+    images: ['/logo.png'],
     creator: '@xiaomihu_escape',
   },
   robots: {
@@ -95,8 +100,9 @@ const jsonLd = {
   '@context': 'https://schema.org',
   '@type': 'WebApplication',
   name: '小迷糊密室逃脫揪團平台',
-  description: '台灣最懂密室玩家的揪團神器！快速找到志同道合的密室夥伴，一起挑戰各種主題密室逃脫。',
-  url: 'https://xiaomihu.tw',
+  description:
+    '小迷糊是為台灣密室逃脫玩家打造的揪團平台：一鍵開團與報名、即時招募隊友、名額/候補/攜伴管理、場次資訊整理與主揪審核；還有密室玩家人格測驗、許願池與工作室優惠情報，並支援多條件篩選與分享邀請，讓你快速找到同好、安心出發不孤單。',
+  url: siteUrl,
   applicationCategory: 'Entertainment',
   operatingSystem: 'Web Browser',
   offers: {

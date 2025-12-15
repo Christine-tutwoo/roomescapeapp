@@ -1,5 +1,5 @@
 export default function sitemap() {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://xiaomihu.tw';
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://xiaomihu-escaperoom.com';
   
   return [
     {

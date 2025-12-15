@@ -4517,6 +4517,18 @@ ${url}
                 />
               </div>
               <h1 className="text-2xl font-bold text-white mb-2">小迷糊密室逃脫揪團平台</h1>
+              {/* SEO / 內容結構：補足可見的 H2，讓首頁標題層級更完整 */}
+              <div className="mt-4 space-y-2">
+                <h2 className="text-sm font-bold text-slate-200">
+                  快速找隊友揪團：即時招募、名額與候補管理
+                </h2>
+                <h2 className="text-sm font-bold text-slate-200">
+                  密室玩家人格測驗：找到更合拍的解謎搭檔
+                </h2>
+                <h2 className="text-sm font-bold text-slate-200">
+                  活動管理與優惠情報：揪團更輕鬆、出發更安心
+                </h2>
+              </div>
               <p className="text-slate-400">v1.0.0</p>
             </div>
 
