@@ -1434,14 +1434,23 @@ ${url}
         if (!d) return 0;
         const dateStr = formatDate(d);
         // 這裡的 events 現在是即時從 Firestore 取得的，所以這裡計算的數量也是即時的
-        return events.filter(e => e.date === dateStr).length;
+        // 過濾掉已額滿的活動（剩餘名額為 0 的活動不計入日曆）
+        return events.filter(e => {
+            if (e.date !== dateStr) return false;
+            const remaining = getRemainingSlots(e);
+            return remaining > 0; // 只計算還有名額的活動
+        }).length;
     };
 
     const handlePrevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
     const handleNextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
 
     const selectedDateEvents = selectedDate 
-      ? events.filter(e => e.date === formatDate(selectedDate))
+      ? events.filter(e => {
+          if (e.date !== formatDate(selectedDate)) return false;
+          const remaining = getRemainingSlots(e);
+          return remaining > 0; // 只顯示還有名額的活動
+        })
       : [];
 
     return (
