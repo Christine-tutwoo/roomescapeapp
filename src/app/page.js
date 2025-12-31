@@ -1,38 +1,40 @@
-'use client';
-
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import {
   ArrowRight, Instagram, MessageCircle, TrendingUp,
   Ghost
 } from 'lucide-react';
 import AppLayout from './components/AppLayout';
 
-export default function LandingPage() {
-  const router = useRouter();
-
+export default function LandingPage({ searchParams }) {
   // Backward-compat: 舊分享連結是丟到首頁 `/?eventId=...`
-  // 這裡自動轉到 `/lobby?...`，避免舊連結掛掉
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const hasShareParam =
-      params.has('eventId') || params.has('wishId') || params.has('host') || params.has('tab') || params.has('edit');
-    if (!hasShareParam) return;
-
-    const tab = params.get('tab');
-    if (tab === 'quiz') {
-      router.replace('/quiz');
-      return;
+  // 這裡改成 server-side redirect，避免 client hydration 掛掉時不會跳轉
+  const sp = searchParams || {};
+  const hasShareParam = !!(
+    sp.eventId ||
+    sp.wishId ||
+    sp.host ||
+    sp.tab ||
+    sp.edit
+  );
+  if (hasShareParam) {
+    if (sp.tab === 'quiz') {
+      redirect('/quiz');
     }
-
-    router.replace(`/lobby?${params.toString()}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleFindGroup = () => {
-    router.push('/lobby');
-  };
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(sp)) {
+      if (value == null) continue;
+      if (Array.isArray(value)) {
+        value.forEach((v) => {
+          if (typeof v === 'string') params.append(key, v);
+        });
+      } else if (typeof value === 'string') {
+        params.set(key, value);
+      }
+    }
+    const qs = params.toString();
+    redirect(qs ? `/lobby?${qs}` : '/lobby');
+  }
 
   return (
     <AppLayout>
@@ -49,13 +51,13 @@ export default function LandingPage() {
             <p className="text-lg sm:text-xl text-text-secondary mb-10 max-w-lg mx-auto leading-relaxed">
               一鍵開團、成員審核，<br className="sm:hidden" />讓您快速成團、安心出發。
             </p>
-            <button
-              onClick={handleFindGroup}
+            <Link
+              href="/lobby"
               className="btn-primary flex items-center gap-3 mx-auto text-lg shadow-xl shadow-accent-orange/20"
             >
               立即找團
               <ArrowRight size={22} className="group-hover:translate-x-1 transition-transform" />
-            </button>
+            </Link>
           </div>
         </section>
 
