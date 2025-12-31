@@ -70,6 +70,30 @@ export default function ProfilePage() {
 
   const [wishMembersModal, setWishMembersModal] = useState({ show: false, wishId: null, members: [] });
 
+  // --- 活動編輯（在 Profile 內用 modal 編輯，避免跳去 lobby） ---
+  const [editEventModal, setEditEventModal] = useState({ show: false, eventId: null });
+  const [editEventForm, setEditEventForm] = useState({
+    title: '',
+    studio: '',
+    region: '北部',
+    category: '密室逃脫',
+    type: '恐怖驚悚',
+    date: '',
+    time: '',
+    price: '',
+    priceFull: '',
+    totalSlots: '',
+    location: '',
+    website: '',
+    description: '',
+    teammateNote: '',
+    contactLineId: '',
+    meetingTime: '15',
+    duration: '120',
+    minPlayers: '4',
+    builtInPlayers: '',
+  });
+
   const showToast = (msg, type = 'success', duration = 3000) => {
     setNotification({ show: true, msg, type });
     window.setTimeout(() => {
@@ -344,6 +368,126 @@ export default function ProfilePage() {
     }
   };
 
+  const openEditEventModal = (ev) => {
+    if (!ev) return;
+    if (ev.isChainEvent) {
+      showToast('連刷舊團目前僅供檢視，無法在此編輯', 'info');
+      return;
+    }
+    setEditEventForm({
+      title: ev.title || '',
+      studio: ev.studio || '',
+      region: ev.region || '北部',
+      category: ev.category || '密室逃脫',
+      type: ev.type || '恐怖驚悚',
+      date: ev.date || '',
+      time: ev.time || '',
+      price: String(ev.price ?? ''),
+      priceFull: String(ev.priceFull ?? ''),
+      totalSlots: String(ev.totalSlots ?? ''),
+      location: ev.location || '',
+      website: ev.website || '',
+      description: ev.description || '',
+      teammateNote: ev.teammateNote || '',
+      contactLineId: ev.contactLineId || '',
+      meetingTime: String(ev.meetingTime ?? '15'),
+      duration: String(ev.duration ?? '120'),
+      minPlayers: String(ev.minPlayers ?? '4'),
+      builtInPlayers: String(ev.builtInPlayers ?? ''),
+    });
+    setEditEventModal({ show: true, eventId: ev.id });
+  };
+
+  const closeEditEventModal = () => {
+    setEditEventModal({ show: false, eventId: null });
+  };
+
+  const handleSaveEventEdit = async () => {
+    if (!user || user.isVisitor) return;
+    const eventId = editEventModal.eventId;
+    if (!eventId) return;
+
+    const snap = await getDoc(doc(db, 'events', eventId));
+    if (!snap.exists()) {
+      showToast('找不到此活動，可能已被刪除', 'error');
+      closeEditEventModal();
+      fetchEvents();
+      return;
+    }
+    const ev = { id: snap.id, ...snap.data() };
+    if (ev.hostUid !== user.uid) {
+      showToast('您沒有權限編輯此活動', 'error');
+      closeEditEventModal();
+      return;
+    }
+    if (ev.isChainEvent) {
+      showToast('連刷舊團目前僅供檢視，無法在此編輯', 'info');
+      closeEditEventModal();
+      return;
+    }
+
+    const title = editEventForm.title.trim();
+    const studio = editEventForm.studio.trim();
+    const location = editEventForm.location.trim();
+    const date = editEventForm.date;
+    const time = editEventForm.time;
+    const totalSlots = Number(editEventForm.totalSlots);
+    const price = Number(editEventForm.price);
+    const priceFull = editEventForm.priceFull === '' ? price : Number(editEventForm.priceFull);
+
+    if (!title || !studio || !location || !date || !time) {
+      showToast('請填寫必填欄位', 'error');
+      return;
+    }
+    if (!Number.isFinite(totalSlots) || totalSlots < 2) {
+      showToast('總人數需為 2 以上', 'error');
+      return;
+    }
+    const currentSlots = Number(ev.currentSlots || 0);
+    if (Number.isFinite(currentSlots) && totalSlots < currentSlots) {
+      showToast(`總人數不可小於目前人數 (${currentSlots})`, 'error');
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      showToast('費用需為 0 或正整數', 'error');
+      return;
+    }
+    if (!Number.isFinite(priceFull) || priceFull < 0) {
+      showToast('滿團優惠價需為 0 或正整數', 'error');
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'events', eventId), {
+        title,
+        studio,
+        region: editEventForm.region,
+        category: editEventForm.category,
+        type: editEventForm.type,
+        date,
+        time,
+        price,
+        priceFull,
+        totalSlots,
+        location,
+        website: editEventForm.website.trim(),
+        description: editEventForm.description.trim(),
+        teammateNote: editEventForm.teammateNote.trim(),
+        contactLineId: editEventForm.contactLineId.trim(),
+        meetingTime: Number(editEventForm.meetingTime) || 15,
+        duration: Number(editEventForm.duration) || 120,
+        minPlayers: Number(editEventForm.minPlayers) || 4,
+        builtInPlayers: editEventForm.builtInPlayers.trim(),
+      });
+      showToast('活動已更新', 'success');
+      closeEditEventModal();
+      fetchEvents();
+    } catch (error) {
+      console.error('Profile: update event failed', error);
+      showToast('更新失敗', 'error');
+    }
+  };
+
   // --- 我的活動操作（補回：關團刪除 / 取消候補 / 取消審核申請 / 退出揪團(跳車)） ---
   const handleDeleteEvent = async (eventId) => {
     if (!user || user.isVisitor) return;
@@ -529,6 +673,225 @@ export default function ProfilePage() {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Event Modal */}
+      {editEventModal.show && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-6"
+          onClick={closeEditEventModal}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="w-full md:max-w-3xl bg-white rounded-t-2xl md:rounded-2xl border border-[#EBE3D7] shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="max-h-[85vh] overflow-y-auto p-5 md:p-8">
+              <div className="flex items-start justify-between gap-4 mb-6">
+                <div>
+                  <div className="text-xs text-[#7A7A7A] font-bold uppercase tracking-widest">編輯揪團</div>
+                  <div className="text-xl font-bold text-[#212121] mt-1">更新活動資訊</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeEditEventModal}
+                  className="p-2 rounded-xl bg-[#EBE3D7] text-[#7A7A7A] hover:bg-[#D1C7BB] hover:text-[#212121] transition-all"
+                  aria-label="關閉"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">活動分類 *</label>
+                  <select
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.category}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, category: e.target.value }))}
+                  >
+                    {['密室逃脫', '劇本殺', 'TRPG', '桌遊'].map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">所在地區 *</label>
+                  <select
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.region}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, region: e.target.value }))}
+                  >
+                    {['北部', '中部', '南部', '東部', '離島'].map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">主題名稱 *</label>
+                  <input
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.title}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, title: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">密室類型 *</label>
+                  <select
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.type}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, type: e.target.value }))}
+                  >
+                    {['恐怖驚悚', '機關冒險', '劇情沉浸', '推理懸疑', '歡樂新手'].map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5 col-span-2">
+                  <label className="text-sm text-[#7A7A7A] font-medium">工作室 *</label>
+                  <input
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.studio}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, studio: e.target.value }))}
+                  />
+                </div>
+
+                <div className="space-y-1.5 col-span-2">
+                  <label className="text-sm text-[#7A7A7A] font-medium">完整地址 / Google Maps *</label>
+                  <input
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.location}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, location: e.target.value }))}
+                    placeholder="可貼上 Google Maps 或輸入完整地址"
+                  />
+                </div>
+
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">日期 *</label>
+                  <input
+                    type="date"
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    style={{ colorScheme: 'light' }}
+                    value={editEventForm.date}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, date: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">時間 *</label>
+                  <input
+                    type="time"
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    style={{ colorScheme: 'light' }}
+                    value={editEventForm.time}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, time: e.target.value }))}
+                  />
+                </div>
+
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">未滿團/基本價（每人）*</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.price}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, price: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">滿團優惠價（選填）</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.priceFull}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, priceFull: e.target.value }))}
+                  />
+                </div>
+
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">總人數 *</label>
+                  <input
+                    type="number"
+                    min="2"
+                    step="1"
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.totalSlots}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, totalSlots: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">主揪社群名稱（參加後可見）</label>
+                  <input
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.contactLineId}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, contactLineId: e.target.value }))}
+                  />
+                </div>
+
+                <div className="space-y-1.5 col-span-2">
+                  <label className="text-sm text-[#7A7A7A] font-medium">官網連結（選填）</label>
+                  <input
+                    type="url"
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.website}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, website: e.target.value }))}
+                    placeholder="https://..."
+                  />
+                </div>
+
+                <div className="space-y-1.5 col-span-2">
+                  <label className="text-sm text-[#7A7A7A] font-medium">活動簡介（選填，最多 50 字）</label>
+                  <textarea
+                    maxLength={50}
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00] h-20 resize-none"
+                    value={editEventForm.description}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, description: e.target.value }))}
+                  />
+                  <div className="text-xs text-[#7A7A7A] text-right">{editEventForm.description.length}/50</div>
+                </div>
+
+                <div className="space-y-1.5 col-span-2">
+                  <label className="text-sm text-[#7A7A7A] font-medium">主揪備註（選填）</label>
+                  <input
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.teammateNote}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, teammateNote: e.target.value }))}
+                  />
+                </div>
+
+                <div className="col-span-2 pt-2 flex flex-col sm:flex-row gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSaveEventEdit}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#FF8C00] text-white rounded-xl text-sm font-bold hover:bg-[#FFA500] transition-all shadow-md"
+                  >
+                    <Check size={18} />
+                    儲存變更
+                  </button>
+                  <Link
+                    href={`/lobby?action=create&eventId=${encodeURIComponent(editEventModal.eventId)}&edit=true`}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#EBE3D7] text-[#212121] rounded-xl text-sm font-bold border border-[#D1C7BB] hover:bg-[#D1C7BB] transition-all"
+                    title="進階編輯（到大廳）"
+                  >
+                    進階編輯
+                    <ExternalLink size={18} />
+                  </Link>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -843,13 +1206,14 @@ export default function ProfilePage() {
 
                       <div className="flex items-center gap-2 shrink-0">
                         {isHost && (
-                          <Link
-                            href={`/lobby?action=create&eventId=${encodeURIComponent(ev.id)}&edit=true`}
+                          <button
+                            type="button"
+                            onClick={() => openEditEventModal(ev)}
                             className="inline-flex items-center gap-2 px-3 py-2 bg-[#FF8C00] text-white rounded-xl text-sm font-bold hover:bg-[#FFA500] transition-all shadow-md"
                             title="編輯揪團"
                           >
                             <Edit size={16} />
-                          </Link>
+                          </button>
                         )}
                         {isHost && !ev.isChainEvent && (
                           <button

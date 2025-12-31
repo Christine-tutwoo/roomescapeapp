@@ -206,7 +206,6 @@ export default function LobbyPage() {
   const [user, setUser] = useState(VISITOR_USER);
   const [activeTab, setActiveTab] = useState('lobby'); // 'lobby' or 'wishes' 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const createSectionRef = useRef(null);
   const [events, setEvents] = useState([]);
   const [wishes, setWishes] = useState([]); // 新增許願池狀態
   const [lastVisible, setLastVisible] = useState(null);
@@ -372,16 +371,7 @@ export default function LobbyPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // when create opens, scroll to form
-  useEffect(() => {
-    if (!isCreateOpen) return;
-    const el = createSectionRef.current;
-    if (!el) return;
-    const t = setTimeout(() => {
-      el.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-    }, 50);
-    return () => clearTimeout(t);
-  }, [isCreateOpen]);
+  // create modal 不需要自動捲動（避免打斷使用者瀏覽列表）
 
   const openProfileTab = () => {
     if (!requireAuth()) return;
@@ -3719,22 +3709,31 @@ ${url}
 
         {/* Create tab removed - now handled by FAB button and query param */}
         {isCreateOpen && (
-          <div ref={createSectionRef} className="animate-in fade-in slide-in-from-bottom-4 duration-300 scroll-mt-28">
-            <h2 className="text-xl font-bold text-[#212121] mb-6 flex items-center">
-              {createMode === 'wish' ? <Sparkles className="mr-2 text-[#FF8C00]" /> : (isEditing ? <Edit className="mr-2 text-[#FF8C00]" /> : <Plus className="mr-2 text-[#FF8C00]" />)}
-              {createMode === 'wish' ? '許願新活動' : (isEditing ? '編輯揪團內容' : '建立新揪團')}
-            </h2>
-
-            <div className="flex justify-end mb-3">
-              <button
-                type="button"
-                onClick={closeCreatePanel}
-                className="px-4 py-2 rounded-xl bg-[#EBE3D7] text-[#7A7A7A] font-bold hover:bg-[#D1C7BB] hover:text-[#212121] transition-all inline-flex items-center gap-2"
-              >
-                <X size={16} />
-                關閉開團
-              </button>
-            </div>
+          <div
+            className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-0 md:p-6"
+            onClick={closeCreatePanel}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="w-full md:max-w-3xl bg-bg-primary rounded-t-[2rem] md:rounded-[2rem] border border-white/40 shadow-premium overflow-hidden animate-in fade-in slide-in-from-bottom-4 md:zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="max-h-[85vh] overflow-y-auto p-5 md:p-8">
+                <div className="flex items-start justify-between gap-4 mb-6">
+                  <h2 className="text-xl font-bold text-[#212121] flex items-center">
+                    {createMode === 'wish' ? <Sparkles className="mr-2 text-[#FF8C00]" /> : (isEditing ? <Edit className="mr-2 text-[#FF8C00]" /> : <Plus className="mr-2 text-[#FF8C00]" />)}
+                    {createMode === 'wish' ? '許願新活動' : (isEditing ? '編輯揪團內容' : '建立新揪團')}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={closeCreatePanel}
+                    className="p-2 rounded-xl bg-[#EBE3D7] text-[#7A7A7A] font-bold hover:bg-[#D1C7BB] hover:text-[#212121] transition-all inline-flex items-center gap-2"
+                    aria-label="關閉"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
 
             {/* 許願切換按鈕 */}
             {!isEditing && (
@@ -4003,6 +4002,8 @@ ${url}
                 )}
               </div>
             </form>
+              </div>
+            </div>
           </div>
         )}
 
