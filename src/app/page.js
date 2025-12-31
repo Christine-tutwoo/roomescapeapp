@@ -183,13 +183,13 @@ export default function LandingPage({ searchParams }) {
           <p className="text-text-secondary font-medium mb-10">
             趕快來看看有沒有你感興趣的密室逃脫主題吧！
           </p>
-          <button
-            onClick={handleFindGroup}
+          <Link
+            href="/lobby"
             className="btn-primary group flex items-center gap-3 mx-auto px-10 py-4 text-xl shadow-xl shadow-accent-orange/20"
           >
             立即找團
             <ArrowRight size={24} className="group-hover:translate-x-1 transition-transform" />
-          </button>
+          </Link>
         </section>
       </div>
     </AppLayout>
