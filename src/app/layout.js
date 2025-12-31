@@ -1,16 +1,17 @@
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Outfit } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const outfit = Outfit({
+  variable: "--font-outfit",
   subsets: ["latin"],
 });
+
 
 // NOTE: 預設網域用正式站（避免 Canonical/JSON-LD 指向錯誤網域）
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://xiaomihu-escaperoom.com';
@@ -18,9 +19,8 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://xiaomihu-escaperoom
 export const metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    // 讓標題長度更貼近 SEO 建議（30+ 字元）
-    default: "小迷糊密室逃脫揪團平台｜找隊友揪團、人格測驗、活動管理一次搞定",
-    template: "%s | 小迷糊密室逃脫揪團",
+    default: "小迷糊密室揪團平台",
+    template: "%s | 小迷糊密室揪團平台",
   },
   // 讓描述長度更貼近 SEO 建議（120+ 字元）
   description:
@@ -55,8 +55,8 @@ export const metadata = {
     type: 'website',
     locale: 'zh_TW',
     url: siteUrl,
-    siteName: '小迷糊密室逃脫揪團平台',
-    title: '小迷糊密室逃脫揪團平台｜找隊友揪團、人格測驗、活動管理一次搞定',
+    siteName: '小迷糊密室揪團平台',
+    title: '小迷糊密室揪團平台',
     description:
       '小迷糊是為台灣密室逃脫玩家打造的揪團平台：一鍵開團與報名、即時招募隊友、名額/候補/攜伴管理、場次資訊整理與主揪審核；再加上人格測驗、許願池與工作室優惠情報，並支援多條件篩選與分享邀請，揪團更輕鬆。',
     images: [
@@ -71,7 +71,7 @@ export const metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: '小迷糊密室逃脫揪團平台｜找隊友揪團、人格測驗、活動管理一次搞定',
+    title: '小迷糊密室揪團平台',
     description:
       '一鍵開團與報名、即時招募隊友、名額/候補/攜伴管理、場次資訊整理與主揪審核；再加上人格測驗、許願池與工作室優惠情報，支援多條件篩選與分享邀請，讓你快速找到同好、安心出發不孤單。',
     images: ['/logo.png'],
@@ -103,7 +103,7 @@ const jsonLd = [
   {
     '@context': 'https://schema.org',
     '@type': 'WebApplication',
-    name: '小迷糊密室逃脫揪團平台',
+    name: '小迷糊密室揪團平台',
     description:
       '小迷糊是為台灣密室逃脫玩家打造的揪團平台：一鍵開團與報名、即時招募隊友、名額/候補/攜伴管理、場次資訊整理與主揪審核；還有密室玩家人格測驗、許願池與工作室優惠情報，並支援多條件篩選與分享邀請，讓你快速找到同好、安心出發不孤單。',
     url: siteUrl,
@@ -152,7 +152,7 @@ const jsonLd = [
   {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    name: '小迷糊密室逃脫揪團平台',
+    name: '小迷糊密室揪團平台',
     url: siteUrl,
     publisher: {
       '@type': 'Organization',
@@ -177,9 +177,10 @@ export default function RootLayout({ children }) {
         />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${inter.variable} ${outfit.variable} antialiased`}
       >
         {children}
+
         {/* Google Analytics 4 */}
         <Script
           src={`https://www.googletagmanager.com/gtag/js?id=${process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID}`}
