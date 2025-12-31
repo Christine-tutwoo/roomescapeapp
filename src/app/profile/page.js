@@ -17,7 +17,7 @@ import {
   limit,
   arrayRemove,
 } from 'firebase/firestore';
-import { ExternalLink, LogIn, LogOut, Settings, Share2, Trash2, Users, X, Edit2, Check, XCircle } from 'lucide-react';
+import { ExternalLink, LogIn, LogOut, Settings, Share2, Trash2, Users, X, Edit2, Check, XCircle, Edit } from 'lucide-react';
 import Link from 'next/link';
 
 const VISITOR_USER = {
@@ -344,7 +344,136 @@ export default function ProfilePage() {
     }
   };
 
+  // --- 我的活動操作（補回：關團刪除 / 取消候補 / 取消審核申請 / 退出揪團(跳車)） ---
+  const handleDeleteEvent = async (eventId) => {
+    if (!user || user.isVisitor) return;
+    const target = events.find((e) => e.id === eventId);
+    if (!target) return;
+    if (target.hostUid !== user.uid) {
+      showToast('您沒有權限刪除此活動', 'error');
+      return;
+    }
+    if (target.isChainEvent) {
+      showToast('連刷舊團目前僅供檢視，無法在此操作', 'info');
+      return;
+    }
+    if (!confirm('確定要刪除這個揪團嗎？此操作無法復原。')) return;
+
+    try {
+      // 與 LobbyPage 對齊：先備份至 archived_events，再刪除 events
+      await setDoc(doc(db, 'archived_events', eventId), {
+        ...target,
+        hostUid: target.hostUid || user.uid,
+        archivedAt: new Date(),
+        finalParticipants: target.participants || [],
+        finalWaitlist: target.waitlist || [],
+      });
+      await deleteDoc(doc(db, 'events', eventId));
+      showToast('揪團已刪除並封存', 'success');
+      fetchEvents();
+    } catch (error) {
+      console.error('Profile: delete event failed', error);
+      showToast('刪除失敗', 'error');
+    }
+  };
+
+  const handleCancelWaitlist = async (eventId) => {
+    if (!user || user.isVisitor) return;
+    try {
+      await updateDoc(doc(db, 'events', eventId), { waitlist: arrayRemove(user.uid) });
+      showToast('已取消候補申請', 'success');
+      fetchEvents();
+    } catch (error) {
+      console.error('Profile: cancel waitlist failed', error);
+      showToast('操作失敗', 'error');
+    }
+  };
+
+  const handleWithdrawPending = async (eventId) => {
+    if (!user || user.isVisitor) return;
+    try {
+      const snap = await getDoc(doc(db, 'events', eventId));
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const pending = Array.isArray(data.pendingApprovals) ? [...data.pendingApprovals] : [];
+      const updated = pending.filter((req) => req?.uid !== user.uid);
+      await updateDoc(doc(db, 'events', eventId), { pendingApprovals: updated });
+      showToast('已取消審核申請', 'success');
+      fetchEvents();
+    } catch (error) {
+      console.error('Profile: withdraw pending failed', error);
+      showToast('操作失敗', 'error');
+    }
+  };
+
+  const handleLeaveEvent = async (eventId) => {
+    if (!user || user.isVisitor) return;
+    const target = events.find((e) => e.id === eventId);
+    if (!target) return;
+    if (target.hostUid === user.uid) {
+      showToast('主揪請使用刪除按鈕關團，無法自行跳車', 'info');
+      return;
+    }
+    if (!confirm(`確定要退出此揪團嗎？\n\n這將會增加您的跳車次數 (${(user.flakeCount || 0) + 1})。`)) return;
+
+    try {
+      // 讀取最新資料避免 race condition
+      const snap = await getDoc(doc(db, 'events', eventId));
+      if (!snap.exists()) return;
+      const ev = { id: snap.id, ...snap.data() };
+      const isStillParticipant = Array.isArray(ev.participants) && ev.participants.includes(user.uid);
+      if (!isStillParticipant) {
+        showToast('您已不在此揪團，無需重複退出', 'info');
+        fetchEvents();
+        return;
+      }
+
+      // 1) 更新 user flakeCount（與 LobbyPage 對齊：>=3 直接凍結）
+      const newFlakeCount = (user.flakeCount || 0) + 1;
+      await updateDoc(doc(db, 'users', user.uid), {
+        flakeCount: newFlakeCount,
+        isBanned: newFlakeCount >= 3,
+      });
+      setUser((prev) => ({ ...prev, flakeCount: newFlakeCount, isBanned: newFlakeCount >= 3 }));
+
+      // 2) 移除本人與攜伴、釋放名額、解除滿團狀態
+      const userGuests = (ev.guests || []).filter((g) => g?.addedByUid === user.uid);
+      const remainingGuests = (ev.guests || []).filter((g) => g?.addedByUid !== user.uid);
+      const remainingNotices = (ev.guestRemovalNotices || []).filter((n) => n?.ownerUid !== user.uid);
+      const slotsToRelease = 1 + userGuests.length;
+      const newSlots = (ev.currentSlots || 0) - slotsToRelease;
+
+      await updateDoc(doc(db, 'events', eventId), {
+        participants: arrayRemove(user.uid),
+        guests: remainingGuests,
+        guestRemovalNotices: remainingNotices,
+        currentSlots: newSlots < 0 ? 0 : newSlots,
+        isFull: false,
+      });
+
+      showToast(newFlakeCount >= 3 ? '跳車次數過多，帳號已凍結' : '已取消報名 (跳車+1)', 'error');
+      fetchEvents();
+    } catch (error) {
+      console.error('Profile: leave event failed', error);
+      showToast('操作失敗', 'error');
+    }
+  };
+
   const totalEventCount = myEventBuckets.joined.length + myEventBuckets.waitlisted.length;
+  const hostPendingEvents = useMemo(() => {
+    if (!user || user.isVisitor) return [];
+    return events
+      .filter((ev) => ev.hostUid === user.uid)
+      .filter((ev) => Array.isArray(ev.pendingApprovals) && ev.pendingApprovals.length > 0);
+  }, [events, user]);
+
+  const hostWishNotifications = useMemo(() => {
+    if (!user || user.isVisitor) return [];
+    return wishes
+      .filter((w) => w.hostUid === user.uid)
+      .filter((w) => (w.wishCount || 0) > 1 || ((w.targetCount || 0) > 0 && (w.wishCount || 0) >= (w.targetCount || 0)))
+      .sort((a, b) => (b.wishCount || 0) - (a.wishCount || 0));
+  }, [wishes, user]);
 
   return (
     <div className="py-4 space-y-6">
@@ -540,6 +669,107 @@ export default function ProfilePage() {
         )}
       </div>
 
+      {/* 主揪審核（待處理） */}
+      {!user?.isVisitor && hostPendingEvents.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 border border-[#EBE3D7] shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-[#212121]">主揪審核</h3>
+            <div className="text-xs font-bold text-[#FF8C00] bg-[#FFE4B5]/60 border border-[#FF8C00]/30 px-3 py-1 rounded-full">
+              待審核 {hostPendingEvents.reduce((sum, ev) => sum + (ev.pendingApprovals?.length || 0), 0)} 人
+            </div>
+          </div>
+          <div className="space-y-3">
+            {hostPendingEvents.slice(0, 5).map((ev) => (
+              <div
+                key={ev.id}
+                className="p-4 rounded-2xl border border-[#EBE3D7] bg-[#F7F4EF] flex items-center justify-between gap-3"
+              >
+                <div className="min-w-0">
+                  <div className="font-bold text-[#212121] truncate">{ev.title}</div>
+                  <div className="text-xs text-[#7A7A7A] mt-1 truncate">
+                    {ev.date} {ev.time} · 待審核 {ev.pendingApprovals?.length || 0} 人
+                  </div>
+                </div>
+                <Link
+                  href={`/lobby?eventId=${encodeURIComponent(ev.id)}&manage=true`}
+                  className="shrink-0 inline-flex items-center gap-2 px-4 py-2 bg-[#FF8C00] text-white rounded-xl text-sm font-bold hover:bg-[#FFA500] transition-all shadow-md"
+                  title="前往審核"
+                >
+                  前往審核
+                  <ExternalLink size={16} />
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 集氣通知（我的許願被集氣） */}
+      {!user?.isVisitor && hostWishNotifications.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 border border-[#EBE3D7] shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-[#212121]">集氣通知</h3>
+            <div className="text-xs font-bold text-[#7A7A7A] bg-[#EBE3D7] border border-[#D1C7BB] px-3 py-1 rounded-full">
+              {hostWishNotifications.length} 則
+            </div>
+          </div>
+          <div className="space-y-3">
+            {hostWishNotifications.slice(0, 6).map((wish) => {
+              const currentCount = wish.wishCount || 1;
+              const targetCount = wish.targetCount || 4;
+              const isFull = currentCount >= targetCount;
+              return (
+                <div
+                  key={wish.id}
+                  className="p-4 rounded-2xl border border-[#EBE3D7] bg-[#F7F4EF] flex items-start justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="font-bold text-[#212121] truncate">{wish.title}</div>
+                      <span
+                        className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                          isFull
+                            ? 'bg-[#FFE4B5]/60 text-[#FF8C00] border-[#FF8C00]/30'
+                            : 'bg-pink-500/10 text-pink-400 border-pink-500/20'
+                        }`}
+                      >
+                        {currentCount}/{targetCount}
+                      </span>
+                      {isFull && (
+                        <span className="text-xs font-bold bg-emerald-500/10 text-emerald-700 px-2.5 py-1 rounded-full border border-emerald-500/20">
+                          可開團
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-[#7A7A7A] mt-1 truncate">
+                      {wish.studio} · {wish.region}
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleViewWishMembers(wish)}
+                      className="inline-flex items-center gap-2 px-3 py-2 bg-[#EBE3D7] text-[#212121] rounded-xl text-sm font-bold border border-[#D1C7BB] hover:bg-[#D1C7BB] transition-all"
+                      title="查看集氣成員"
+                    >
+                      <Users size={16} />
+                    </button>
+                    <Link
+                      href={`/lobby?wishId=${encodeURIComponent(wish.id)}`}
+                      className="inline-flex items-center gap-2 px-3 py-2 bg-[#EBE3D7] text-[#212121] rounded-xl text-sm font-bold border border-[#D1C7BB] hover:bg-[#D1C7BB] transition-all"
+                      title="前往許願池定位"
+                    >
+                      前往
+                      <ExternalLink size={16} />
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 我的活動（簡化：只顯示清單，避免把 lobby 的所有操作再複製一份） */}
       {!user?.isVisitor && (
         <div>
@@ -564,12 +794,18 @@ export default function ProfilePage() {
                 const isJoined = myEventBuckets.joined.some((e) => e.id === ev.id);
                 const isWaitlisted = myEventBuckets.waitlisted.some((e) => e.id === ev.id);
                 const locationLink = getMapsUrl(ev.location || '');
+                const isHost = ev.hostUid === user.uid;
 
                 return (
                   <div key={ev.id} className="bg-white rounded-3xl p-5 border border-[#EBE3D7] shadow-sm">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap mb-2">
+                          {isHost && (
+                            <span className="text-xs font-bold bg-[#FF8C00]/10 text-[#FF8C00] px-2.5 py-1 rounded-lg border border-[#FF8C00]/20">
+                              我主辦
+                            </span>
+                          )}
                           {isPending && (
                             <span className="text-xs font-bold bg-amber-500/10 text-amber-700 px-2.5 py-1 rounded-lg border border-amber-500/20">
                               待審核
@@ -605,14 +841,65 @@ export default function ProfilePage() {
                         )}
                       </div>
 
-                      <Link
-                        href={`/lobby?eventId=${encodeURIComponent(ev.id)}`}
-                        className="shrink-0 inline-flex items-center gap-2 px-4 py-2 bg-[#EBE3D7] text-[#212121] rounded-xl text-sm font-bold border border-[#D1C7BB]"
-                        title="到大廳定位此活動"
-                      >
-                        前往
-                        <ExternalLink size={16} />
-                      </Link>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isHost && (
+                          <Link
+                            href={`/lobby?action=create&eventId=${encodeURIComponent(ev.id)}&edit=true`}
+                            className="inline-flex items-center gap-2 px-3 py-2 bg-[#FF8C00] text-white rounded-xl text-sm font-bold hover:bg-[#FFA500] transition-all shadow-md"
+                            title="編輯揪團"
+                          >
+                            <Edit size={16} />
+                          </Link>
+                        )}
+                        {isHost && !ev.isChainEvent && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteEvent(ev.id)}
+                            className="inline-flex items-center gap-2 px-3 py-2 bg-[#EBE3D7] text-[#7A7A7A] rounded-xl text-sm font-bold border border-[#D1C7BB] hover:bg-[#D1C7BB] hover:text-[#E74C3C] transition-all"
+                            title="刪除揪團"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                        {isPending && (
+                          <button
+                            type="button"
+                            onClick={() => handleWithdrawPending(ev.id)}
+                            className="inline-flex items-center gap-2 px-3 py-2 bg-[#EBE3D7] text-[#7A7A7A] rounded-xl text-sm font-bold border border-[#D1C7BB] hover:bg-[#D1C7BB] transition-all"
+                            title="取消審核申請"
+                          >
+                            <XCircle size={16} />
+                          </button>
+                        )}
+                        {isWaitlisted && (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelWaitlist(ev.id)}
+                            className="inline-flex items-center gap-2 px-3 py-2 bg-[#EBE3D7] text-[#7A7A7A] rounded-xl text-sm font-bold border border-[#D1C7BB] hover:bg-[#D1C7BB] transition-all"
+                            title="取消候補申請"
+                          >
+                            <XCircle size={16} />
+                          </button>
+                        )}
+                        {isJoined && !isHost && (
+                          <button
+                            type="button"
+                            onClick={() => handleLeaveEvent(ev.id)}
+                            className="inline-flex items-center gap-2 px-3 py-2 bg-[#EBE3D7] text-[#7A7A7A] rounded-xl text-sm font-bold border border-[#D1C7BB] hover:bg-[#D1C7BB] hover:text-[#E74C3C] transition-all"
+                            title="退出此揪團 (跳車)"
+                          >
+                            <LogOut size={16} />
+                          </button>
+                        )}
+                        <Link
+                          href={`/lobby?eventId=${encodeURIComponent(ev.id)}`}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-[#EBE3D7] text-[#212121] rounded-xl text-sm font-bold border border-[#D1C7BB] hover:bg-[#D1C7BB] transition-all"
+                          title="到大廳定位此活動"
+                        >
+                          前往
+                          <ExternalLink size={16} />
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 );
@@ -704,6 +991,24 @@ export default function ProfilePage() {
                       </button>
                     </div>
                   </div>
+
+                  {wish.description && (
+                    <div className="mb-4">
+                      <div className="text-xs font-medium text-[#7A7A7A] mb-1">活動簡介</div>
+                      <p className="text-sm text-[#212121] leading-relaxed whitespace-pre-wrap break-words">
+                        {wish.description}
+                      </p>
+                    </div>
+                  )}
+
+                  {wish.hostNote && (
+                    <div className="mb-4">
+                      <div className="text-xs font-medium text-[#7A7A7A] mb-1">主揪備註</div>
+                      <div className="text-sm text-[#212121] font-medium italic bg-[#F7F4EF] border border-[#EBE3D7] rounded-lg px-3 py-2 leading-relaxed whitespace-pre-wrap break-words">
+                        {wish.hostNote}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Progress Bar */}
                   <div className="mb-1">

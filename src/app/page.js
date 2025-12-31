@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowRight, Instagram, MessageCircle, TrendingUp,
@@ -9,6 +10,25 @@ import AppLayout from './components/AppLayout';
 
 export default function LandingPage() {
   const router = useRouter();
+
+  // Backward-compat: 舊分享連結是丟到首頁 `/?eventId=...`
+  // 這裡自動轉到 `/lobby?...`，避免舊連結掛掉
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const hasShareParam =
+      params.has('eventId') || params.has('wishId') || params.has('host') || params.has('tab') || params.has('edit');
+    if (!hasShareParam) return;
+
+    const tab = params.get('tab');
+    if (tab === 'quiz') {
+      router.replace('/quiz');
+      return;
+    }
+
+    router.replace(`/lobby?${params.toString()}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleFindGroup = () => {
     router.push('/lobby');
@@ -90,7 +110,7 @@ export default function LandingPage() {
                   <TrendingUp size={32} className="text-accent-orange" />
                 </div>
                 <p className="text-lg text-text-secondary font-bold font-outfit uppercase tracking-[0.2em] mb-4">
-                  從 2024/10 創立至今
+                  從 2025/10 月創立至今
                 </p>
                 <div className="text-4xl sm:text-6xl font-black text-text-primary text-center tracking-tight mb-4">
                   已開超過 <span className="text-accent-orange">二十團</span>

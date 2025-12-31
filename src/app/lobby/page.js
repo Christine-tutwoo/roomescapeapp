@@ -449,6 +449,8 @@ export default function LobbyPage() {
       const sharedHostUid = urlParams.get('host');
       const sharedWishId = urlParams.get('wishId');
       const sharedTab = urlParams.get('tab');
+      const shouldEdit = urlParams.get('edit') === 'true';
+      const shouldManage = urlParams.get('manage') === 'true';
 
       // 處理 tab 參數（quiz 轉導至新頁面）
       if (sharedTab === 'quiz') {
@@ -460,7 +462,17 @@ export default function LobbyPage() {
         // 直接從 Firestore 載入該活動，確保分享連結可用
         getDoc(doc(db, "events", sharedEventId)).then(eventDoc => {
           if (eventDoc.exists()) {
-            setSharedEvent({ id: eventDoc.id, ...eventDoc.data() });
+            const eventData = { id: eventDoc.id, ...eventDoc.data() };
+            setSharedEvent(eventData);
+            
+            // 如果需要編輯，儲存編輯標記到 sessionStorage，等待用戶登入後處理
+            if (shouldEdit) {
+              sessionStorage.setItem('pendingEditEventId', sharedEventId);
+            }
+            // 如果需要打開主揪管理（審核/名單），也延後到登入後處理
+            if (shouldManage) {
+              sessionStorage.setItem('pendingManageEventId', sharedEventId);
+            }
           }
         }).catch(err => {
           console.error("Error loading shared event:", err);
@@ -538,6 +550,87 @@ export default function LobbyPage() {
           const normalizedDisplayName = userData.communityNickname || userData.displayName || currentUser.displayName || "匿名玩家";
           userData = { ...userData, displayName: normalizedDisplayName };
           setUser({ ...userData, isVisitor: false });
+          
+          // 檢查是否有待處理的編輯請求
+          const pendingEditEventId = sessionStorage.getItem('pendingEditEventId');
+          if (pendingEditEventId) {
+            sessionStorage.removeItem('pendingEditEventId');
+            // 載入活動資料並進入編輯模式
+            getDoc(doc(db, "events", pendingEditEventId)).then(eventDoc => {
+              if (eventDoc.exists()) {
+                const eventData = { id: eventDoc.id, ...eventDoc.data() };
+                if (eventData.hostUid === currentUser.uid) {
+                  if (eventData.isChainEvent) {
+                    showToast("連刷舊團目前僅供檢視，無法在此編輯", "info");
+                    return;
+                  }
+                  setFormData({
+                    title: eventData.title, 
+                    studio: eventData.studio, 
+                    region: eventData.region || "北部", 
+                    category: eventData.category || "密室逃脫", 
+                    date: eventData.date, 
+                    time: eventData.time,
+                    price: eventData.price, 
+                    priceFull: eventData.priceFull || eventData.price,
+                    totalSlots: eventData.totalSlots, 
+                    location: eventData.location, 
+                    type: eventData.type || "恐怖驚悚",
+                    website: eventData.website || "", 
+                    description: eventData.description || "",
+                    meetingTime: eventData.meetingTime || "15", 
+                    duration: eventData.duration || "120", 
+                    minPlayers: eventData.minPlayers || 4,
+                    teammateNote: eventData.teammateNote || "", 
+                    contactLineId: eventData.contactLineId || "", 
+                    isChainEvent: false, 
+                    chainSessions: [],
+                    builtInPlayers: eventData.builtInPlayers || ""
+                  });
+                  setEditingId(eventData.id);
+                  setIsEditing(true);
+                  setActiveTab('lobby');
+                  setCreateMode('event');
+                  openCreatePanel();
+                  setFilterEventId(pendingEditEventId);
+                  
+                  // 清除 URL 中的 edit 參數
+                  const newUrl = new URL(window.location.href);
+                  newUrl.searchParams.delete('edit');
+                  window.history.replaceState({}, '', newUrl);
+                } else {
+                  showToast("您沒有權限編輯此活動", "error");
+                }
+              }
+            }).catch(err => {
+              console.error("Error loading event for edit:", err);
+            });
+          }
+
+          // 檢查是否有待處理的主揪管理（開啟名單/審核視窗）
+          const pendingManageEventId = sessionStorage.getItem('pendingManageEventId');
+          if (pendingManageEventId) {
+            sessionStorage.removeItem('pendingManageEventId');
+            getDoc(doc(db, "events", pendingManageEventId)).then(eventDoc => {
+              if (!eventDoc.exists()) return;
+              const eventData = { id: eventDoc.id, ...eventDoc.data() };
+              if (eventData.hostUid !== currentUser.uid) {
+                showToast("您沒有權限管理此活動", "error");
+                return;
+              }
+              setManagingEvent(eventData);
+              setIsViewOnlyMode(false);
+              setShowManageModal(true);
+              setFilterEventId(pendingManageEventId);
+
+              // 清除 URL 中的 manage 參數
+              const newUrl = new URL(window.location.href);
+              newUrl.searchParams.delete('manage');
+              window.history.replaceState({}, '', newUrl);
+            }).catch(err => {
+              console.error("Error loading event for manage:", err);
+            });
+          }
         } catch (error) {
           console.error("Error fetching user data:", error);
           // 如果資料庫讀取失敗，至少先讓使用者登入，但顯示錯誤
@@ -934,7 +1027,7 @@ export default function LobbyPage() {
 
   const handleShare = (eventId) => {
     const event = events.find(e => e.id === eventId);
-    const url = `${window.location.origin}?eventId=${eventId}`;
+    const url = `${window.location.origin}/lobby?eventId=${eventId}`;
 
     let text = url;
     if (event) {
@@ -1781,7 +1874,9 @@ ${url}
     });
     setEditingId(ev.id);
     setIsEditing(true);
-    setActiveTab('create');
+    setActiveTab('lobby');
+    setCreateMode('event');
+    openCreatePanel();
   };
 
   const handleDelete = async (id, options = {}) => {
@@ -3479,7 +3574,7 @@ ${url}
                 <div className="text-center py-10">
                   <p className="text-[#7A7A7A] mb-4">{filterWishId ? "找不到該許願，可能已被刪除" : "目前還沒有人許願"}</p>
                   {!filterWishId && (
-                    <button onClick={() => { setActiveTab('create'); setCreateMode('wish'); }} className="px-4 py-2 bg-pink-500 text-[#212121] rounded-xl text-sm font-bold shadow-lg shadow-pink-500/20 hover:bg-pink-400 transition-all">
+                    <button onClick={() => { setActiveTab('lobby'); setCreateMode('wish'); openCreatePanel(); }} className="px-4 py-2 bg-pink-500 text-[#212121] rounded-xl text-sm font-bold shadow-lg shadow-pink-500/20 hover:bg-pink-400 transition-all">
                       我來許第一個願！
                     </button>
                   )}
@@ -3550,9 +3645,21 @@ ${url}
                       </div>
 
                       {wish.description && (
-                        <p className="pl-3 text-xs text-[#7A7A7A] mb-4 line-clamp-2">
-                          {wish.description}
-                        </p>
+                        <div className="pl-3 mb-4">
+                          <div className="text-xs font-medium text-[#7A7A7A] mb-1">活動簡介</div>
+                          <p className="text-xs text-[#212121] leading-relaxed whitespace-pre-wrap break-words">
+                            {wish.description}
+                          </p>
+                        </div>
+                      )}
+
+                      {wish.hostNote && (
+                        <div className="pl-3 mb-4">
+                          <div className="text-xs font-medium text-[#7A7A7A] mb-1">主揪備註</div>
+                          <div className="text-xs text-[#212121] font-medium italic bg-[#F7F4EF] border border-[#EBE3D7] rounded-lg px-3 py-2 leading-relaxed whitespace-pre-wrap break-words">
+                            {wish.hostNote}
+                          </div>
+                        </div>
                       )}
 
                       {/* Progress Bar */}
@@ -3761,15 +3868,27 @@ ${url}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-sm text-[#7A7A7A] font-medium">日期 <span className="text-red-500">*</span></label>
-                      <input required type="date" className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] focus:border-emerald-500 outline-none [color-scheme:dark]"
+                      <input 
+                        required 
+                        type="date" 
+                        className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] focus:border-emerald-500 outline-none"
+                        style={{ colorScheme: 'light' }}
                         min={formatDate(new Date())}
                         max={maxEventDate}
-                        value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} />
+                        value={formData.date} 
+                        onChange={e => setFormData({ ...formData, date: e.target.value })} 
+                      />
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-sm text-[#7A7A7A] font-medium">時間 <span className="text-red-500">*</span></label>
-                      <input required type="time" className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] focus:border-emerald-500 outline-none [color-scheme:dark]"
-                        value={formData.time} onChange={e => setFormData({ ...formData, time: e.target.value })} />
+                      <input 
+                        required 
+                        type="time" 
+                        className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] focus:border-emerald-500 outline-none"
+                        style={{ colorScheme: 'light' }}
+                        value={formData.time} 
+                        onChange={e => setFormData({ ...formData, time: e.target.value })} 
+                      />
                     </div>
                   </div>
 
@@ -3872,15 +3991,6 @@ ${url}
                 </>
               )}
 
-              {createMode === 'event' && (
-                <div className="bg-white/40 border border-[#EBE3D7] rounded-2xl p-4 text-sm text-[#7A7A7A] space-y-2">
-                  <h4 className="font-semibold text-[#212121] flex items-center gap-2">
-                    <Sparkles size={16} className="text-amber-400" />
-                    連刷場次暫停新增
-                  </h4>
-                  <p>目前平台已停止新增連刷團，舊有資料仍會在大廳與我的活動中顯示，若需要協助請聯繫管理員。</p>
-                </div>
-              )}
 
               <div className="pt-2">
                 <button type="submit" disabled={user.flakeCount >= 3} className={`w-full font-bold text-lg py-4 rounded-xl shadow-lg active:scale-95 transition-all ${user.flakeCount >= 3 ? 'bg-[#EBE3D7] text-[#7A7A7A] cursor-not-allowed' : createMode === 'wish' ? 'bg-pink-500 text-[#212121] shadow-pink-500/20 hover:bg-pink-400' : 'bg-[#FF8C00] text-[#212121] shadow-[#FF8C00]/20 hover:bg-[#FFA500]'}`}>
@@ -5015,7 +5125,7 @@ ${url}
             <button
               onClick={() => {
                 const { eventId, eventData } = sharePrompt;
-                const shareUrl = `${window.location.origin}?eventId=${eventId}`;
+                const shareUrl = `${window.location.origin}/lobby?eventId=${eventId}`;
                 const text = `
 主題：${eventData.title}
 

@@ -842,7 +842,7 @@ useEffect(() => {
 
   const handleShare = (eventId) => {
     const event = events.find(e => e.id === eventId);
-    const url = `${window.location.origin}?eventId=${eventId}`;
+    const url = `${window.location.origin}/lobby?eventId=${eventId}`;
     
     let text = url;
     if (event) {
@@ -4926,7 +4926,7 @@ ${url}
                 <button
                     onClick={() => {
                         const { eventId, eventData } = sharePrompt;
-                        const shareUrl = `${window.location.origin}?eventId=${eventId}`;
+                        const shareUrl = `${window.location.origin}/lobby?eventId=${eventId}`;
                         const text = `
 主題：${eventData.title}
 
