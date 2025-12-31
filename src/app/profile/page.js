@@ -94,6 +94,17 @@ export default function ProfilePage() {
     builtInPlayers: '',
   });
 
+  // Modal UX: open 時鎖住背景捲動（手機較不會「滑到背景」）
+  useEffect(() => {
+    const shouldLock = !!(wishMembersModal.show || editEventModal.show);
+    if (!shouldLock) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [wishMembersModal.show, editEventModal.show]);
+
   const showToast = (msg, type = 'success', duration = 3000) => {
     setNotification({ show: true, msg, type });
     window.setTimeout(() => {
@@ -690,7 +701,7 @@ export default function ProfilePage() {
             className="w-full md:max-w-3xl bg-white rounded-t-2xl md:rounded-2xl border border-[#EBE3D7] shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="max-h-[85vh] overflow-y-auto p-5 md:p-8">
+            <div className="max-h-[85dvh] md:max-h-[85vh] overflow-y-auto overscroll-contain p-5 md:p-8 pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
               <div className="flex items-start justify-between gap-4 mb-6">
                 <div>
                   <div className="text-xs text-[#7A7A7A] font-bold uppercase tracking-widest">編輯揪團</div>
@@ -882,14 +893,13 @@ export default function ProfilePage() {
                     <Check size={18} />
                     儲存變更
                   </button>
-                  <Link
-                    href={`/lobby?action=create&eventId=${encodeURIComponent(editEventModal.eventId)}&edit=true`}
+                  <button
+                    type="button"
+                    onClick={closeEditEventModal}
                     className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#EBE3D7] text-[#212121] rounded-xl text-sm font-bold border border-[#D1C7BB] hover:bg-[#D1C7BB] transition-all"
-                    title="進階編輯（到大廳）"
                   >
-                    進階編輯
-                    <ExternalLink size={18} />
-                  </Link>
+                    取消
+                  </button>
                 </div>
               </div>
             </div>

@@ -373,6 +373,16 @@ export default function LobbyPage() {
 
   // create modal 不需要自動捲動（避免打斷使用者瀏覽列表）
 
+  // Modal UX: open 時鎖住背景捲動（手機較不會「滑到背景」）
+  useEffect(() => {
+    if (!isCreateOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isCreateOpen]);
+
   const openProfileTab = () => {
     if (!requireAuth()) return;
     setActiveTab('profile');
@@ -3719,7 +3729,7 @@ ${url}
               className="w-full md:max-w-3xl bg-bg-primary rounded-t-[2rem] md:rounded-[2rem] border border-white/40 shadow-premium overflow-hidden animate-in fade-in slide-in-from-bottom-4 md:zoom-in-95 duration-200"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="max-h-[85vh] overflow-y-auto p-5 md:p-8">
+              <div className="max-h-[85dvh] md:max-h-[85vh] overflow-y-auto overscroll-contain p-5 md:p-8 pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
                 <div className="flex items-start justify-between gap-4 mb-6">
                   <h2 className="text-xl font-bold text-[#212121] flex items-center">
                     {createMode === 'wish' ? <Sparkles className="mr-2 text-[#FF8C00]" /> : (isEditing ? <Edit className="mr-2 text-[#FF8C00]" /> : <Plus className="mr-2 text-[#FF8C00]" />)}
