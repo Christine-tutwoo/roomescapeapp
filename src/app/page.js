@@ -2,11 +2,12 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowRight, Instagram, MessageCircle, TrendingUp,
-  Ghost
 } from 'lucide-react';
 import AppLayout from './components/AppLayout';
+import { reader } from '@/lib/keystatic-reader';
+import HomepageGallery from './components/HomepageGallery';
 
-export default function LandingPage({ searchParams }) {
+export default async function LandingPage({ searchParams }) {
   // Backward-compat: 舊分享連結是丟到首頁 `/?eventId=...`
   // 這裡改成 server-side redirect，避免 client hydration 掛掉時不會跳轉
   const sp = searchParams || {};
@@ -35,6 +36,16 @@ export default function LandingPage({ searchParams }) {
     const qs = params.toString();
     redirect(qs ? `/lobby?${qs}` : '/lobby');
   }
+
+  // 從 Keystatic 讀取首頁內容
+  let homepageData = null;
+  try {
+    homepageData = await reader.singletons.homepage.read();
+  } catch (error) {
+    console.error('Failed to load homepage data from Keystatic:', error);
+  }
+
+  const galleryItems = homepageData?.galleryItems || [];
 
   return (
     <AppLayout>
@@ -124,18 +135,7 @@ export default function LandingPage({ searchParams }) {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <div className="aspect-[4/5] bg-bg-secondary/50 rounded-[2rem] border border-accent-beige/20 flex flex-col items-center justify-center gap-3 group hover:border-accent-orange/30 transition-colors">
-                <Ghost size={32} className="text-text-secondary opacity-20 group-hover:scale-110 group-hover:text-accent-orange transition-all duration-500" />
-                <span className="text-xs font-bold text-text-secondary opacity-40">真實活動剪影</span>
-              </div>
-              <div className="aspect-[4/5] bg-bg-secondary/50 rounded-[2rem] border border-accent-beige/20 flex flex-col items-center justify-center gap-3 group hover:border-accent-orange/30 transition-colors">
-                <Ghost size={32} className="text-text-secondary opacity-20 group-hover:scale-110 group-hover:text-accent-orange transition-all duration-500" />
-                <span className="text-xs font-bold text-text-secondary opacity-40">玩家熱情反饋</span>
-              </div>
-              <div className="hidden sm:flex aspect-[4/5] bg-bg-secondary/50 rounded-[2rem] border border-accent-beige/20 flex-col items-center justify-center gap-3 group hover:border-accent-orange/30 transition-colors">
-                <Ghost size={32} className="text-text-secondary opacity-20 group-hover:scale-110 group-hover:text-accent-orange transition-all duration-500" />
-                <span className="text-xs font-bold text-text-secondary opacity-40">成團慶祝時刻</span>
-              </div>
+              <HomepageGallery items={galleryItems} />
             </div>
           </div>
         </section>
