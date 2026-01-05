@@ -116,7 +116,7 @@ export default async function LandingPage({ searchParams }) {
                   從 2025/10 月創立至今
                 </p>
                 <div className="text-4xl sm:text-6xl font-black text-text-primary text-center tracking-tight mb-4">
-                  已開超過 <span className="text-accent-orange">二十團</span>
+                  已開超過 <span className="text-accent-orange">五十團</span>
                 </div>
                 <p className="text-text-secondary font-medium text-center max-w-md">
                   穩定的揪團頻率，讓小迷糊成為密室玩家首選的媒合平台。

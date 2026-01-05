@@ -245,10 +245,6 @@ export default function HomepageCarousel() {
         </>
       )}
 
-      <div className="absolute top-4 left-4 inline-flex items-center gap-2 bg-white/80 text-text-primary px-3 py-1 rounded-full text-xs font-semibold shadow-md">
-        {currentSlide.type === 'video' ? <Play size={14} /> : null}
-        精選第 {active + 1} 張
-      </div>
     </div>
   );
 }
