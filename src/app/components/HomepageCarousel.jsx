@@ -224,8 +224,7 @@ export default function HomepageCarousel() {
               key={currentSlide.id}
               src={currentSlide.src}
               alt={`carousel-${active}`}
-              className="w-full h-full object-cover object-center"
-              style={{ minWidth: '100%', minHeight: '100%' }}
+              className="w-full h-full object-contain object-center"
               onError={() => {
                 setImageError(true);
                 setImageLoading(false);
