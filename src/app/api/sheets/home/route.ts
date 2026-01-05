@@ -1,13 +1,24 @@
 import { NextResponse } from 'next/server';
-import { fetchHomepageEntriesFromSheet } from '@/lib/googleSheets';
+import { fetchHomepageSlides } from '@/lib/googleSheets';
 
 export async function GET() {
   try {
-    const data = await fetchHomepageEntriesFromSheet();
-    return NextResponse.json({ data });
-  } catch (error) {
-    console.error('[api/sheets/home] failed', error);
-    return NextResponse.json({ error: 'failed_to_fetch_homepage' }, { status: 500 });
+    const sheetUrl = process.env.NEXT_PUBLIC_GS_SHEET_URL;
+    
+    if (!sheetUrl) {
+      return NextResponse.json(
+        { error: '配置錯誤' },
+        { status: 500 }
+      );
+    }
+
+    const slides = await fetchHomepageSlides(sheetUrl);
+    return NextResponse.json(slides);
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: '載入失敗' },
+      { status: 500 }
+    );
   }
 }
 

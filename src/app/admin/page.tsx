@@ -1,46 +1,106 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Lock, X } from 'lucide-react';
+import { RefreshCw, CheckCircle, XCircle, Loader, Lock } from 'lucide-react';
+import Link from 'next/link';
+
+// Admin 認證已移到服務端，不再在前端暴露
 
 export default function AdminPage() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState('');
-
-  const ADMIN_USERNAME = process.env.NEXT_PUBLIC_ADMIN_USERNAME || 'admin';
-  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'admin123';
+  
+  const [publishing, setPublishing] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
-    // 檢查是否已經登入
-    const authStatus = sessionStorage.getItem('admin_authenticated');
-    if (authStatus === 'true') {
-      setIsAuthenticated(true);
-    }
+    // 檢查服務端認證狀態
+    fetch('/api/admin/login')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.authenticated) {
+          setIsAuthenticated(true);
+        }
+      })
+      .catch(() => {
+        // 忽略錯誤
+      });
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-      setIsAuthenticated(true);
-      sessionStorage.setItem('admin_authenticated', 'true');
-    } else {
-      setError('帳號或密碼錯誤');
+    try {
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setIsAuthenticated(true);
+      } else {
+        setError(data.error || '帳號或密碼錯誤');
+      }
+    } catch (error: any) {
+      setError('登入失敗，請稍後再試');
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      // 清除 cookie（需要服務端 API）
+      await fetch('/api/admin/logout', { method: 'POST' });
+    } catch {
+      // 忽略錯誤
+    }
     setIsAuthenticated(false);
-    sessionStorage.removeItem('admin_authenticated');
     setUsername('');
     setPassword('');
+    setResult(null);
   };
 
-  const homepageSheetUrl = process.env.NEXT_PUBLIC_GS_HOME_SHEET_URL || '';
-  const promoSheetUrl = process.env.NEXT_PUBLIC_GS_PROMO_SHEET_URL || '';
+  const handlePublish = async () => {
+    setPublishing(true);
+    setResult(null);
+
+    try {
+      const response = await fetch('/api/admin/publish', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setResult({
+          success: true,
+          message: '發布成功！所有用戶下次訪問時會檢查版本時間並自動更新。',
+        });
+      } else {
+        setResult({
+          success: false,
+          message: data.error || '發布失敗',
+        });
+      }
+    } catch (error: any) {
+      setResult({
+        success: false,
+        message: error.message || '發布時發生錯誤',
+      });
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   if (!isAuthenticated) {
     return (
@@ -101,63 +161,80 @@ export default function AdminPage() {
     );
   }
 
-  const tools = [
-    {
-      title: '首頁輪播內容',
-      description: '更新圖片或 YouTube 連結，將自動同步到首頁輪播。',
-      href: homepageSheetUrl,
-      placeholder: '尚未設定 Google Sheet 連結',
-    },
-    {
-      title: '優惠資訊',
-      description: '管理優惠順序、標題、內容與圖片顯示。',
-      href: promoSheetUrl,
-      placeholder: '尚未設定 Google Sheet 連結',
-    },
-  ];
-
   return (
     <div className="min-h-screen bg-[#F7F4EF]">
-      <div className="max-w-5xl mx-auto p-4 space-y-6">
-        <div className="bg-white rounded-2xl border border-[#EBE3D7] shadow-xl p-6 flex items-center justify-between">
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="bg-white rounded-2xl border border-[#EBE3D7] shadow-xl p-8 mb-6 flex items-center justify-between">
           <div>
-            <p className="text-sm uppercase tracking-[0.5em] text-[#C1B7AA]">Admin</p>
-            <h1 className="text-2xl font-bold text-[#212121] mt-2">內容管理面板</h1>
-            <p className="text-[#7A7A7A] mt-1">透過 Google Sheet 管理首頁輪播與優惠資訊。</p>
+            <h1 className="text-3xl font-bold text-[#212121] mb-2">管理後台</h1>
+            <p className="text-[#7A7A7A]">發布更新</p>
           </div>
           <button
             onClick={handleLogout}
-            className="p-2 bg-[#F7F4EF] hover:bg-[#EFE7DB] rounded-full text-[#7A7A7A] transition-colors"
+            className="px-4 py-2 bg-[#F7F4EF] hover:bg-[#EFE7DB] rounded-xl text-[#7A7A7A] transition-colors"
           >
-            <X size={18} />
+            登出
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {tools.map((tool) => (
-            <div key={tool.title} className="bg-white rounded-2xl border border-[#EBE3D7] p-5 shadow-sm">
-              <h2 className="text-lg font-bold text-[#212121]">{tool.title}</h2>
-              <p className="text-sm text-[#7A7A7A] mt-2 mb-4">{tool.description}</p>
-              {tool.href ? (
-                <a
-                  href={tool.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center w-full py-2.5 rounded-xl bg-[#212121] text-white font-semibold hover:opacity-90 transition"
-                >
-                  開啟 Google Sheet
-                </a>
-              ) : (
-                <div className="text-xs text-[#C75C00] bg-[#FFF4E6] border border-[#FFE1BD] rounded-xl px-4 py-2 text-center">
-                  {tool.placeholder}
-                </div>
-              )}
+        {/* 發布更新區塊 */}
+        <div className="bg-white rounded-2xl border border-[#EBE3D7] shadow-xl p-8 mb-6">
+          <h2 className="text-xl font-bold text-[#212121] mb-4">發布更新</h2>
+          <p className="text-[#7A7A7A] mb-6">
+            發布更新後，所有用戶下次訪問時會檢查版本時間，如果他們的快取時間早於最新版本，會自動更新。
+          </p>
+
+          {result && (
+            <div
+              className={`mb-6 p-4 rounded-xl border ${
+                result.success
+                  ? 'bg-green-50 border-green-200 text-green-800'
+                  : 'bg-red-50 border-red-200 text-red-800'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {result.success ? (
+                  <CheckCircle size={20} />
+                ) : (
+                  <XCircle size={20} />
+                )}
+                <p>{result.message}</p>
+              </div>
             </div>
-          ))}
+          )}
+
+          <button
+            onClick={handlePublish}
+            disabled={publishing}
+            className={`w-full py-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 ${
+              publishing
+                ? 'bg-[#C1B7AA] cursor-not-allowed'
+                : 'bg-[#FF8C00] text-white hover:opacity-90'
+            }`}
+          >
+            {publishing ? (
+              <>
+                <Loader className="animate-spin" size={20} />
+                發布中...
+              </>
+            ) : (
+              <>
+                <RefreshCw size={20} />
+                發布更新
+              </>
+            )}
+          </button>
+        </div>
+
+        <div className="text-center">
+          <Link
+            href="/"
+            className="text-[#7A7A7A] hover:text-[#212121] transition"
+          >
+            返回首頁
+          </Link>
         </div>
       </div>
     </div>
   );
 }
-
-

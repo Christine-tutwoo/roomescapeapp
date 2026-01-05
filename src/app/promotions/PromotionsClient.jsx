@@ -2,18 +2,22 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Image, X } from 'lucide-react';
-import { readCache, writeCache } from '@/lib/clientCache';
+import { readCache, writeCache, shouldUpdateCache } from '@/lib/clientCache';
 
 const CACHE_KEY = 'sheet-cache:promotions';
-const CACHE_TTL = Number(process.env.NEXT_PUBLIC_SHEET_CACHE_TTL_MS || 5 * 60 * 1000);
+// 快取時間：一個禮拜（7天）
+const CACHE_TTL = Number(process.env.NEXT_PUBLIC_SHEET_CACHE_TTL_MS || 7 * 24 * 60 * 60 * 1000);
 
 async function fetchPromotionsFromApi() {
-  const response = await fetch('/api/sheets/promotions', { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error('Failed to fetch promotions');
+  try {
+    const response = await fetch('/api/sheets/promotions');
+    if (!response.ok) {
+      return [];
+    }
+    return await response.json();
+  } catch (error) {
+    return [];
   }
-  const { data } = await response.json();
-  return Array.isArray(data) ? data : [];
 }
 
 export default function PromotionsClient() {
@@ -23,26 +27,57 @@ export default function PromotionsClient() {
 
   useEffect(() => {
     let cancelled = false;
-    const cached = readCache(CACHE_KEY, CACHE_TTL);
-    if (cached && !cancelled) {
-      setPromotions(cached);
-      setStatus('ready');
+    
+    async function loadData() {
+      // 先檢查版本時間，決定是否需要更新
+      const needsUpdate = await shouldUpdateCache(CACHE_KEY);
+      
+      if (needsUpdate && !cancelled) {
+        // 需要更新：直接載入最新數據
+        setStatus('loading');
+        fetchPromotionsFromApi()
+          .then((data) => {
+            if (cancelled) return;
+            setPromotions(data);
+            setStatus('ready');
+            writeCache(CACHE_KEY, data);
+          })
+          .catch(() => {
+            if (!cancelled) {
+              // 如果載入失敗，嘗試使用快取（如果有的話）
+              const fallbackCache = readCache(CACHE_KEY, CACHE_TTL);
+              if (fallbackCache) {
+                setPromotions(fallbackCache);
+                setStatus('ready');
+              } else {
+                setStatus('error');
+              }
+            }
+          });
+      } else {
+        // 不需要更新：使用快取
+        const cached = readCache(CACHE_KEY, CACHE_TTL);
+        if (cached && !cancelled) {
+          setPromotions(cached);
+          setStatus('ready');
+        } else {
+          // 沒有快取，需要載入
+          setStatus('loading');
+          fetchPromotionsFromApi()
+            .then((data) => {
+              if (cancelled) return;
+              setPromotions(data);
+              setStatus('ready');
+              writeCache(CACHE_KEY, data);
+            })
+            .catch(() => {
+              if (!cancelled) setStatus('error');
+            });
+        }
+      }
     }
 
-    if (!cached) {
-      setStatus('loading');
-      fetchPromotionsFromApi()
-        .then((data) => {
-          if (cancelled) return;
-          setPromotions(data);
-          setStatus('ready');
-          writeCache(CACHE_KEY, data);
-        })
-        .catch((error) => {
-          console.error('[PromotionsClient] fetch failed', error);
-          if (!cancelled) setStatus('error');
-        });
-    }
+    loadData();
 
     return () => {
       cancelled = true;

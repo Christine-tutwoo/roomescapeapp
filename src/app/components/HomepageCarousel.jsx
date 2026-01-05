@@ -2,12 +2,18 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
-import { readCache, writeCache } from '@/lib/clientCache';
+import { readCache, writeCache, shouldUpdateCache } from '@/lib/clientCache';
 
 const CACHE_KEY = 'sheet-cache:homepage';
-const CACHE_TTL = Number(process.env.NEXT_PUBLIC_SHEET_CACHE_TTL_MS || 5 * 60 * 1000);
+// 快取時間：一個禮拜（7天）
+const CACHE_TTL = Number(process.env.NEXT_PUBLIC_SHEET_CACHE_TTL_MS || 7 * 24 * 60 * 60 * 1000);
 
 function toYoutubeEmbed(url) {
+  // 如果是 base64 data URL，直接返回 null（不是 YouTube）
+  if (typeof url === 'string' && (url.startsWith('data:image/') || url.startsWith('data:video/'))) {
+    return null;
+  }
+  
   try {
     const parsed = new URL(url);
     if (parsed.hostname.includes('youtube.com')) {
@@ -21,16 +27,17 @@ function toYoutubeEmbed(url) {
       return `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&loop=1&playlist=${id}`;
     }
   } catch {
-    //
+    // URL 解析失敗（可能是 base64 data URL 或其他格式）
   }
   return null;
 }
 
 function buildSlide(url, index) {
-  if (!url) return null;
+  if (!url || typeof url !== 'string') return null;
+  
   const embed = toYoutubeEmbed(url);
   return {
-    id: `${index}-${url}`,
+    id: `${index}-${url.substring(0, 50)}`,
     type: embed ? 'video' : 'image',
     src: embed || url,
     original: url,
@@ -38,17 +45,23 @@ function buildSlide(url, index) {
 }
 
 async function fetchSlidesFromApi() {
-  const response = await fetch('/api/sheets/home', { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error('Failed to fetch homepage slides');
+  try {
+    const response = await fetch('/api/sheets/home');
+    if (!response.ok) {
+      return [];
+    }
+    return await response.json();
+  } catch (error) {
+    return [];
   }
-  const { data } = await response.json();
-  return Array.isArray(data) ? data : [];
 }
 
 export default function HomepageCarousel() {
   const [sources, setSources] = useState([]);
   const [status, setStatus] = useState('loading');
+  const [imageError, setImageError] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
+  
   const slides = useMemo(() => {
     if (!Array.isArray(sources)) return [];
     return sources
@@ -57,30 +70,66 @@ export default function HomepageCarousel() {
   }, [sources]);
 
   const [active, setActive] = useState(0);
+  
+  // 當切換 slide 時重置載入狀態
+  useEffect(() => {
+    setImageLoading(true);
+    setImageError(false);
+  }, [active]);
 
   useEffect(() => {
     let cancelled = false;
 
-    const cached = readCache(CACHE_KEY, CACHE_TTL);
-    if (cached && !cancelled) {
-      setSources(cached);
-      setStatus('ready');
+    async function loadData() {
+      // 先檢查版本時間，決定是否需要更新
+      const needsUpdate = await shouldUpdateCache(CACHE_KEY);
+      
+      if (needsUpdate && !cancelled) {
+        // 需要更新：直接載入最新數據
+        setStatus('loading');
+        fetchSlidesFromApi()
+          .then((data) => {
+            if (cancelled) return;
+            setSources(data);
+            setStatus('ready');
+            writeCache(CACHE_KEY, data);
+          })
+          .catch(() => {
+            if (!cancelled) {
+              // 如果載入失敗，嘗試使用快取（如果有的話）
+              const fallbackCache = readCache(CACHE_KEY, CACHE_TTL);
+              if (fallbackCache) {
+                setSources(fallbackCache);
+                setStatus('ready');
+              } else {
+                setStatus('error');
+              }
+            }
+          });
+      } else {
+        // 不需要更新：使用快取
+        const cached = readCache(CACHE_KEY, CACHE_TTL);
+        if (cached && !cancelled) {
+          setSources(cached);
+          setStatus('ready');
+        } else {
+          // 沒有快取，需要載入
+          setStatus('loading');
+          fetchSlidesFromApi()
+            .then((data) => {
+              if (cancelled) return;
+              setSources(data);
+              setStatus('ready');
+              writeCache(CACHE_KEY, data);
+            })
+            .catch(() => {
+              if (!cancelled) setStatus('error');
+            });
+        }
+      }
     }
 
-    if (!cached) {
-      setStatus('loading');
-      fetchSlidesFromApi()
-        .then((data) => {
-          if (cancelled) return;
-          setSources(data);
-          setStatus('ready');
-          writeCache(CACHE_KEY, data);
-        })
-        .catch((error) => {
-          console.error('[HomepageCarousel] fetch failed', error);
-          if (!cancelled) setStatus('error');
-        });
-    }
+    loadData();
 
     return () => {
       cancelled = true;
@@ -111,11 +160,29 @@ export default function HomepageCarousel() {
     );
   }
 
+  if (imageError) {
+    return (
+      <div className="aspect-video rounded-[2.5rem] border border-accent-beige/30 bg-white/70 flex flex-col items-center justify-center text-text-secondary text-sm p-4">
+        <div>圖片載入失敗</div>
+        <div className="mt-2 text-xs text-red-500 text-center">
+          請檢查圖片 URL 是否正確
+          <br />
+          <span className="text-[10px] break-all">{slides[active]?.src?.substring(0, 80)}...</span>
+        </div>
+      </div>
+    );
+  }
+
   const currentSlide = slides[active];
 
   return (
     <div className="relative">
-      <div className="aspect-video rounded-[2.5rem] overflow-hidden border border-accent-beige/30 shadow-premium bg-black">
+      <div className="aspect-video rounded-[2.5rem] overflow-hidden border border-accent-beige/30 shadow-premium bg-black relative">
+        {imageLoading && currentSlide.type === 'image' && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+            <div className="text-white text-sm">載入中...</div>
+          </div>
+        )}
         {currentSlide.type === 'video' ? (
           <iframe
             key={currentSlide.id}
@@ -131,9 +198,17 @@ export default function HomepageCarousel() {
             src={currentSlide.src}
             alt={`carousel-${active}`}
             className="w-full h-full object-cover"
+            onError={() => {
+              setImageError(true);
+              setImageLoading(false);
+            }}
+            onLoad={() => {
+              setImageError(false);
+              setImageLoading(false);
+            }}
           />
         )}
-        {currentSlide.type === 'image' && (
+        {currentSlide.type === 'image' && !imageLoading && (
           <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/40 pointer-events-none" />
         )}
       </div>

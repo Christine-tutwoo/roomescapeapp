@@ -9,7 +9,8 @@ import HomepageCarousel from './components/HomepageCarousel';
 export default async function LandingPage({ searchParams }) {
   // Backward-compat: 舊分享連結是丟到首頁 `/?eventId=...`
   // 這裡改成 server-side redirect，避免 client hydration 掛掉時不會跳轉
-  const sp = searchParams || {};
+  // Next.js 16: searchParams 現在是 Promise，需要 await
+  const sp = (await searchParams) || {};
   const hasShareParam = !!(
     sp.eventId ||
     sp.wishId ||

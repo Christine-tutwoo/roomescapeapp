@@ -1,13 +1,24 @@
 import { NextResponse } from 'next/server';
-import { fetchPromotionEntriesFromSheet } from '@/lib/googleSheets';
+import { fetchPromotions } from '@/lib/googleSheets';
 
 export async function GET() {
   try {
-    const data = await fetchPromotionEntriesFromSheet();
-    return NextResponse.json({ data });
-  } catch (error) {
-    console.error('[api/sheets/promotions] failed', error);
-    return NextResponse.json({ error: 'failed_to_fetch_promotions' }, { status: 500 });
+    const sheetUrl = process.env.NEXT_PUBLIC_GS_SHEET_URL;
+    
+    if (!sheetUrl) {
+      return NextResponse.json(
+        { error: '配置錯誤' },
+        { status: 500 }
+      );
+    }
+
+    const promotions = await fetchPromotions(sheetUrl);
+    return NextResponse.json(promotions);
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: '載入失敗' },
+      { status: 500 }
+    );
   }
 }
 
