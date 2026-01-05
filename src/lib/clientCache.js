@@ -1,17 +1,51 @@
 const SAFE_WINDOW = typeof window !== 'undefined' ? window : null;
 
-export function readCache(key, ttlMs) {
+const memoryAdapter = () => {
+  const store = new Map();
+  return {
+    getItem(key) {
+      return store.has(key) ? store.get(key) : null;
+    },
+    setItem(key, value) {
+      store.set(key, value);
+    },
+    removeItem(key) {
+      store.delete(key);
+    },
+  };
+};
+
+let storageAdapter = null;
+
+function getStorage() {
   if (!SAFE_WINDOW) return null;
+  if (storageAdapter) return storageAdapter;
+
   try {
-    const raw = SAFE_WINDOW.localStorage.getItem(key);
+    const testKey = '__sheet_cache_test__';
+    SAFE_WINDOW.localStorage.setItem(testKey, '1');
+    SAFE_WINDOW.localStorage.removeItem(testKey);
+    storageAdapter = SAFE_WINDOW.localStorage;
+  } catch {
+    storageAdapter = memoryAdapter();
+  }
+
+  return storageAdapter;
+}
+
+export function readCache(key, ttlMs) {
+  const storage = getStorage();
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed.timestamp !== 'number') {
-      SAFE_WINDOW.localStorage.removeItem(key);
+      storage.removeItem(key);
       return null;
     }
     if (Date.now() - parsed.timestamp > ttlMs) {
-      SAFE_WINDOW.localStorage.removeItem(key);
+      storage.removeItem(key);
       return null;
     }
     return parsed.data ?? null;
@@ -21,9 +55,10 @@ export function readCache(key, ttlMs) {
 }
 
 export function writeCache(key, data) {
-  if (!SAFE_WINDOW) return;
+  const storage = getStorage();
+  if (!storage) return;
   try {
-    SAFE_WINDOW.localStorage.setItem(
+    storage.setItem(
       key,
       JSON.stringify({
         timestamp: Date.now(),
@@ -37,9 +72,10 @@ export function writeCache(key, data) {
 
 // 獲取快取的版本時間戳
 export function getCacheVersion(key) {
-  if (!SAFE_WINDOW) return null;
+  const storage = getStorage();
+  if (!storage) return null;
   try {
-    const raw = SAFE_WINDOW.localStorage.getItem(key);
+    const raw = storage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return parsed.timestamp || null;
