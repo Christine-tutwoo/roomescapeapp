@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
+import { readCache, writeCache } from '@/lib/clientCache';
+
+const CACHE_KEY = 'sheet-cache:homepage';
+const CACHE_TTL = Number(process.env.NEXT_PUBLIC_SHEET_CACHE_TTL_MS || 5 * 60 * 1000);
 
 function toYoutubeEmbed(url) {
   try {
@@ -33,7 +37,18 @@ function buildSlide(url, index) {
   };
 }
 
-export default function HomepageCarousel({ sources }) {
+async function fetchSlidesFromApi() {
+  const response = await fetch('/api/sheets/home', { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error('Failed to fetch homepage slides');
+  }
+  const { data } = await response.json();
+  return Array.isArray(data) ? data : [];
+}
+
+export default function HomepageCarousel() {
+  const [sources, setSources] = useState([]);
+  const [status, setStatus] = useState('loading');
   const slides = useMemo(() => {
     if (!Array.isArray(sources)) return [];
     return sources
@@ -44,6 +59,35 @@ export default function HomepageCarousel({ sources }) {
   const [active, setActive] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const cached = readCache(CACHE_KEY, CACHE_TTL);
+    if (cached && !cancelled) {
+      setSources(cached);
+      setStatus('ready');
+    }
+
+    if (!cached) {
+      setStatus('loading');
+      fetchSlidesFromApi()
+        .then((data) => {
+          if (cancelled) return;
+          setSources(data);
+          setStatus('ready');
+          writeCache(CACHE_KEY, data);
+        })
+        .catch((error) => {
+          console.error('[HomepageCarousel] fetch failed', error);
+          if (!cancelled) setStatus('error');
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (slides.length <= 1) return undefined;
     const timer = setInterval(() => {
       setActive((prev) => (prev + 1) % slides.length);
@@ -51,10 +95,18 @@ export default function HomepageCarousel({ sources }) {
     return () => clearInterval(timer);
   }, [slides.length]);
 
-  if (slides.length === 0) {
+  if (status === 'loading') {
+    return (
+      <div className="aspect-video rounded-[2.5rem] border border-accent-beige/30 bg-white/70 flex items-center justify-center text-text-secondary text-sm animate-pulse">
+        載入首頁內容…
+      </div>
+    );
+  }
+
+  if (slides.length === 0 || status === 'error') {
     return (
       <div className="aspect-video rounded-[2.5rem] border border-accent-beige/30 bg-white/70 flex items-center justify-center text-text-secondary text-sm">
-        尚未設定首頁展示內容
+        目前沒有可顯示的內容
       </div>
     );
   }

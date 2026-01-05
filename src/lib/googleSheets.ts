@@ -1,55 +1,36 @@
-import { google } from 'googleapis';
-
-type SheetsClient = {
-  sheets: ReturnType<typeof google.sheets>;
-};
-
-const DEFAULT_HOME_RANGE = process.env.GS_HOME_RANGE || 'Homepage!A2:A';
-const DEFAULT_PROMO_RANGE = process.env.GS_PROMO_RANGE || 'Promotions!A2:D';
-
-function assertEnv(value: string | undefined, name: string) {
-  if (!value) {
-    throw new Error(`Missing required env variable: ${name}`);
+function parseGvizResponse(text: string) {
+  const marker = 'google.visualization.Query.setResponse(';
+  const start = text.indexOf(marker);
+  if (start === -1) {
+    throw new Error('Invalid Google Sheets gviz response');
   }
-  return value;
+  const jsonStart = start + marker.length;
+  const jsonEnd = text.lastIndexOf(');');
+  const payload = jsonEnd >= 0 ? text.slice(jsonStart, jsonEnd) : text.slice(jsonStart);
+  return JSON.parse(payload);
 }
 
-let cachedClient: SheetsClient | null = null;
-
-async function getSheetsClient(scopes: string[] = ['https://www.googleapis.com/auth/spreadsheets.readonly']) {
-  if (cachedClient) return cachedClient;
-
-  const clientEmail = assertEnv(process.env.GS_CLIENT_EMAIL, 'GS_CLIENT_EMAIL');
-  const privateKey = assertEnv(process.env.GS_PRIVATE_KEY, 'GS_PRIVATE_KEY').replace(/\\n/g, '\n');
-
-  const auth = new google.auth.JWT({
-    email: clientEmail,
-    key: privateKey,
-    scopes,
-  });
-  const sheets = google.sheets({ version: 'v4', auth });
-
-  cachedClient = { sheets };
-  return cachedClient;
+async function fetchGvizTable(url?: string) {
+  if (!url) {
+    throw new Error('Missing sheet url');
+  }
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch sheet: ${response.status}`);
+  }
+  const text = await response.text();
+  return parseGvizResponse(text).table?.rows ?? [];
 }
 
-export async function fetchHomepageSlides() {
-  try {
-    const spreadsheetId = assertEnv(process.env.GS_SHEET_ID, 'GS_SHEET_ID');
-    const { sheets } = await getSheetsClient();
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: DEFAULT_HOME_RANGE,
-    });
-
-    const rows = res.data.values ?? [];
-    return rows
-      .map((row) => row[0])
-      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
-  } catch (error) {
-    console.error('[googleSheets] fetchHomepageSlides failed', error);
-    return [];
+export async function fetchHomepageEntriesFromSheet() {
+  const url = process.env.GS_HOME_JSON_URL || process.env.NEXT_PUBLIC_GS_HOME_JSON_URL;
+  if (!url) {
+    throw new Error('GS_HOME_JSON_URL is not configured');
   }
+  const rows = await fetchGvizTable(url);
+  return rows
+    .map((row: any) => row?.c?.[0]?.v)
+    .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
 }
 
 export type PromotionEntry = {
@@ -59,30 +40,23 @@ export type PromotionEntry = {
   detailImageUrl?: string;
 };
 
-export async function fetchPromotionEntries(): Promise<PromotionEntry[]> {
-  try {
-    const spreadsheetId = assertEnv(process.env.GS_SHEET_ID, 'GS_SHEET_ID');
-    const { sheets } = await getSheetsClient();
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: DEFAULT_PROMO_RANGE,
-    });
-
-    const rows = res.data.values ?? [];
-    return rows
-      .map((row, index) => {
-        const [order, title, content, detailImageUrl] = row;
-        return {
-          order: Number(order) || index + 1,
-          title: title || '未命名優惠',
-          content: content || '',
-          detailImageUrl: detailImageUrl || undefined,
-        };
-      })
-      .sort((a, b) => a.order - b.order);
-  } catch (error) {
-    console.error('[googleSheets] fetchPromotionEntries failed', error);
-    return [];
+export async function fetchPromotionEntriesFromSheet(): Promise<PromotionEntry[]> {
+  const url = process.env.GS_PROMO_JSON_URL || process.env.NEXT_PUBLIC_GS_PROMO_JSON_URL;
+  if (!url) {
+    throw new Error('GS_PROMO_JSON_URL is not configured');
   }
+  const rows = await fetchGvizTable(url);
+  return rows
+    .map((row: any, index: number) => {
+      const cells = row?.c ?? [];
+      const order = Number(cells?.[0]?.v) || index + 1;
+      return {
+        order,
+        title: cells?.[1]?.v || '未命名優惠',
+        content: cells?.[2]?.v || '',
+        detailImageUrl: cells?.[3]?.v || undefined,
+      };
+    })
+    .sort((a, b) => a.order - b.order);
 }
 

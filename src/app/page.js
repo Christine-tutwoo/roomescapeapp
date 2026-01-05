@@ -5,7 +5,6 @@ import {
 } from 'lucide-react';
 import AppLayout from './components/AppLayout';
 import HomepageCarousel from './components/HomepageCarousel';
-import { fetchHomepageSlides } from '@/lib/googleSheets';
 
 export default async function LandingPage({ searchParams }) {
   // Backward-compat: 舊分享連結是丟到首頁 `/?eventId=...`
@@ -36,8 +35,6 @@ export default async function LandingPage({ searchParams }) {
     const qs = params.toString();
     redirect(qs ? `/lobby?${qs}` : '/lobby');
   }
-
-  const homepageSlides = await fetchHomepageSlides();
 
   return (
     <AppLayout>
@@ -126,7 +123,7 @@ export default async function LandingPage({ searchParams }) {
               </div>
             </div>
 
-            <HomepageCarousel sources={homepageSlides} />
+            <HomepageCarousel />
           </div>
         </section>
 

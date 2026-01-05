@@ -1,10 +1,53 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Image, X } from 'lucide-react';
+import { readCache, writeCache } from '@/lib/clientCache';
 
-export default function PromotionsClient({ promotions }) {
+const CACHE_KEY = 'sheet-cache:promotions';
+const CACHE_TTL = Number(process.env.NEXT_PUBLIC_SHEET_CACHE_TTL_MS || 5 * 60 * 1000);
+
+async function fetchPromotionsFromApi() {
+  const response = await fetch('/api/sheets/promotions', { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error('Failed to fetch promotions');
+  }
+  const { data } = await response.json();
+  return Array.isArray(data) ? data : [];
+}
+
+export default function PromotionsClient() {
   const [modalImage, setModalImage] = useState(null);
+  const [promotions, setPromotions] = useState([]);
+  const [status, setStatus] = useState('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    const cached = readCache(CACHE_KEY, CACHE_TTL);
+    if (cached && !cancelled) {
+      setPromotions(cached);
+      setStatus('ready');
+    }
+
+    if (!cached) {
+      setStatus('loading');
+      fetchPromotionsFromApi()
+        .then((data) => {
+          if (cancelled) return;
+          setPromotions(data);
+          setStatus('ready');
+          writeCache(CACHE_KEY, data);
+        })
+        .catch((error) => {
+          console.error('[PromotionsClient] fetch failed', error);
+          if (!cancelled) setStatus('error');
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sorted = useMemo(() => {
     const list = Array.isArray(promotions) ? promotions.slice() : [];
@@ -20,7 +63,11 @@ export default function PromotionsClient({ promotions }) {
           <p className="text-[#7A7A7A]">小迷糊幫你搜集全台優惠，省荷包也要玩得盡興。</p>
         </div>
 
-        {sorted.length === 0 ? (
+        {status === 'loading' ? (
+          <div className="bg-white/70 rounded-3xl border border-dashed border-[#EBE3D7] py-14 text-center text-[#7A7A7A] animate-pulse">
+            讀取最新優惠…
+          </div>
+        ) : sorted.length === 0 || status === 'error' ? (
           <div className="bg-white/70 rounded-3xl border border-dashed border-[#EBE3D7] py-14 text-center text-[#7A7A7A]">
             目前尚無優惠，歡迎稍後再來查看。
           </div>
