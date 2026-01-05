@@ -1,9 +1,8 @@
 import PromotionsClient from './PromotionsClient';
-import { reader } from '@/lib/keystatic-reader';
+import { fetchPromotionEntries } from '@/lib/googleSheets';
 
 export default async function PromotionsPage() {
-  const all = await reader.collections.promotions.all();
-  const promotions = all.map(({ slug, entry }) => ({ slug, ...entry }));
+  const promotions = await fetchPromotionEntries();
   return <PromotionsClient promotions={promotions} />;
 }
 

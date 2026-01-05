@@ -4,8 +4,8 @@ import {
   ArrowRight, Instagram, MessageCircle, TrendingUp,
 } from 'lucide-react';
 import AppLayout from './components/AppLayout';
-import { reader } from '@/lib/keystatic-reader';
-import HomepageGallery from './components/HomepageGallery';
+import HomepageCarousel from './components/HomepageCarousel';
+import { fetchHomepageSlides } from '@/lib/googleSheets';
 
 export default async function LandingPage({ searchParams }) {
   // Backward-compat: 舊分享連結是丟到首頁 `/?eventId=...`
@@ -37,15 +37,7 @@ export default async function LandingPage({ searchParams }) {
     redirect(qs ? `/lobby?${qs}` : '/lobby');
   }
 
-  // 從 Keystatic 讀取首頁內容
-  let homepageData = null;
-  try {
-    homepageData = await reader.singletons.homepage.read();
-  } catch (error) {
-    console.error('Failed to load homepage data from Keystatic:', error);
-  }
-
-  const galleryItems = homepageData?.galleryItems || [];
+  const homepageSlides = await fetchHomepageSlides();
 
   return (
     <AppLayout>
@@ -134,9 +126,7 @@ export default async function LandingPage({ searchParams }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <HomepageGallery items={galleryItems} />
-            </div>
+            <HomepageCarousel sources={homepageSlides} />
           </div>
         </section>
 

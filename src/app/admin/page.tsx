@@ -1,11 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { Lock, X } from 'lucide-react';
 
 export default function AdminPage() {
-  const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -40,6 +38,9 @@ export default function AdminPage() {
     setUsername('');
     setPassword('');
   };
+
+  const homepageSheetUrl = process.env.NEXT_PUBLIC_GS_HOME_SHEET_URL || '';
+  const promoSheetUrl = process.env.NEXT_PUBLIC_GS_PROMO_SHEET_URL || '';
 
   if (!isAuthenticated) {
     return (
@@ -100,28 +101,59 @@ export default function AdminPage() {
     );
   }
 
+  const tools = [
+    {
+      title: '首頁輪播內容',
+      description: '更新圖片或 YouTube 連結，將自動同步到首頁輪播。',
+      href: homepageSheetUrl,
+      placeholder: '尚未設定 Google Sheet 連結',
+    },
+    {
+      title: '優惠資訊',
+      description: '管理優惠順序、標題、內容與圖片顯示。',
+      href: promoSheetUrl,
+      placeholder: '尚未設定 Google Sheet 連結',
+    },
+  ];
+
   return (
     <div className="min-h-screen bg-[#F7F4EF]">
-      <div className="max-w-7xl mx-auto p-4">
-        <div className="bg-white rounded-2xl border border-[#EBE3D7] shadow-xl overflow-hidden">
-          <div className="bg-gradient-to-r from-[#FF8C00] to-[#FFA500] p-6 flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-white">優惠管理後台</h1>
-            <button
-              onClick={handleLogout}
-              className="p-2 bg-white/20 hover:bg-white/30 rounded-lg text-white transition-colors"
-            >
-              <X size={20} />
-            </button>
+      <div className="max-w-5xl mx-auto p-4 space-y-6">
+        <div className="bg-white rounded-2xl border border-[#EBE3D7] shadow-xl p-6 flex items-center justify-between">
+          <div>
+            <p className="text-sm uppercase tracking-[0.5em] text-[#C1B7AA]">Admin</p>
+            <h1 className="text-2xl font-bold text-[#212121] mt-2">內容管理面板</h1>
+            <p className="text-[#7A7A7A] mt-1">透過 Google Sheet 管理首頁輪播與優惠資訊。</p>
           </div>
+          <button
+            onClick={handleLogout}
+            className="p-2 bg-[#F7F4EF] hover:bg-[#EFE7DB] rounded-full text-[#7A7A7A] transition-colors"
+          >
+            <X size={18} />
+          </button>
+        </div>
 
-          <div className="p-6">
-            <iframe
-              src="/keystatic"
-              className="w-full h-[calc(100vh-250px)] min-h-[600px] border border-[#EBE3D7] rounded-xl"
-              title="Keystatic Admin"
-              allow="clipboard-read; clipboard-write"
-            />
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {tools.map((tool) => (
+            <div key={tool.title} className="bg-white rounded-2xl border border-[#EBE3D7] p-5 shadow-sm">
+              <h2 className="text-lg font-bold text-[#212121]">{tool.title}</h2>
+              <p className="text-sm text-[#7A7A7A] mt-2 mb-4">{tool.description}</p>
+              {tool.href ? (
+                <a
+                  href={tool.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center w-full py-2.5 rounded-xl bg-[#212121] text-white font-semibold hover:opacity-90 transition"
+                >
+                  開啟 Google Sheet
+                </a>
+              ) : (
+                <div className="text-xs text-[#C75C00] bg-[#FFF4E6] border border-[#FFE1BD] rounded-xl px-4 py-2 text-center">
+                  {tool.placeholder}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     </div>
