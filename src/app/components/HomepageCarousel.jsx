@@ -10,21 +10,39 @@ const CACHE_TTL = Number(process.env.NEXT_PUBLIC_SHEET_CACHE_TTL_MS || 7 * 24 * 
 
 function toYoutubeEmbed(url) {
   // 如果是 base64 data URL，直接返回 null（不是 YouTube）
-  if (typeof url === 'string' && (url.startsWith('data:image/') || url.startsWith('data:video/'))) {
+  if (typeof url !== 'string' || url.startsWith('data:image/') || url.startsWith('data:video/')) {
     return null;
   }
   
   try {
     const parsed = new URL(url);
-    if (parsed.hostname.includes('youtube.com')) {
-      const videoId = parsed.searchParams.get('v');
-      if (videoId) {
-        return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}`;
+    const hostname = parsed.hostname.replace('www.', '').replace('m.', '');
+    let videoId = null;
+    
+    // 支援多種 YouTube URL 格式
+    if (hostname === 'youtube.com' || hostname === 'youtu.be') {
+      // 格式 1: youtube.com/watch?v=VIDEO_ID
+      // 格式 2: youtube.com/embed/VIDEO_ID
+      // 格式 3: youtube.com/v/VIDEO_ID
+      // 格式 4: youtu.be/VIDEO_ID
+      if (parsed.pathname.includes('/embed/')) {
+        videoId = parsed.pathname.split('/embed/')[1]?.split('?')[0];
+      } else if (parsed.pathname.includes('/v/')) {
+        videoId = parsed.pathname.split('/v/')[1]?.split('?')[0];
+      } else if (parsed.hostname === 'youtu.be' || parsed.hostname.includes('youtu.be')) {
+        videoId = parsed.pathname.replace(/^\//, '').split('?')[0];
+      } else {
+        videoId = parsed.searchParams.get('v');
       }
-    }
-    if (parsed.hostname === 'youtu.be') {
-      const id = parsed.pathname.replace('/', '');
-      return `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&loop=1&playlist=${id}`;
+      
+      if (videoId) {
+        // 提取時間戳（如果有）
+        const t = parsed.searchParams.get('t');
+        const timeParam = t ? `&start=${parseInt(t)}` : '';
+        
+        // 構建 embed URL，支援自動播放、靜音、循環播放
+        return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=1&rel=0${timeParam}`;
+      }
     }
   } catch {
     // URL 解析失敗（可能是 base64 data URL 或其他格式）
@@ -71,11 +89,17 @@ export default function HomepageCarousel() {
 
   const [active, setActive] = useState(0);
   
-  // 當切換 slide 時重置載入狀態
+  // 當切換 slide 時重置載入狀態（僅針對圖片）
   useEffect(() => {
-    setImageLoading(true);
-    setImageError(false);
-  }, [active]);
+    const currentSlide = slides[active];
+    if (currentSlide?.type === 'image') {
+      setImageLoading(true);
+      setImageError(false);
+    } else {
+      setImageLoading(false);
+      setImageError(false);
+    }
+  }, [active, slides]);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,39 +201,44 @@ export default function HomepageCarousel() {
 
   return (
     <div className="relative">
-      <div className="aspect-video rounded-[2.5rem] overflow-hidden border border-accent-beige/30 shadow-premium bg-black relative">
-        {imageLoading && currentSlide.type === 'image' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-            <div className="text-white text-sm">載入中...</div>
-          </div>
-        )}
+      <div className="aspect-video rounded-[2.5rem] overflow-hidden border border-accent-beige/30 shadow-premium bg-black relative w-full">
         {currentSlide.type === 'video' ? (
           <iframe
             key={currentSlide.id}
             src={currentSlide.src}
             title={`carousel-video-${active}`}
-            className="w-full h-full"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            className="w-full h-full border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
+            frameBorder="0"
+            loading="lazy"
           />
         ) : (
-          <img
-            key={currentSlide.id}
-            src={currentSlide.src}
-            alt={`carousel-${active}`}
-            className="w-full h-full object-cover"
-            onError={() => {
-              setImageError(true);
-              setImageLoading(false);
-            }}
-            onLoad={() => {
-              setImageError(false);
-              setImageLoading(false);
-            }}
-          />
-        )}
-        {currentSlide.type === 'image' && !imageLoading && (
-          <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/40 pointer-events-none" />
+          <>
+            {imageLoading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+                <div className="text-white text-sm">載入中...</div>
+              </div>
+            )}
+            <img
+              key={currentSlide.id}
+              src={currentSlide.src}
+              alt={`carousel-${active}`}
+              className="w-full h-full object-cover object-center"
+              style={{ minWidth: '100%', minHeight: '100%' }}
+              onError={() => {
+                setImageError(true);
+                setImageLoading(false);
+              }}
+              onLoad={() => {
+                setImageError(false);
+                setImageLoading(false);
+              }}
+            />
+            {!imageLoading && (
+              <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/40 pointer-events-none" />
+            )}
+          </>
         )}
       </div>
 
