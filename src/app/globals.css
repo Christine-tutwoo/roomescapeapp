@@ -75,6 +75,58 @@
     font-size: clamp(1.5rem, 3vw + 1rem, 2.5rem);
     @apply font-bold tracking-tight;
   }
+
+  /* ===== 全站動效 Utilities ===== */
+
+  /* 淡入上滑動畫 */
+  .animate-fade-up {
+    animation: fadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  .animate-fade-up-delay-1 {
+    animation: fadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) 0.1s forwards;
+    opacity: 0;
+  }
+
+  .animate-fade-up-delay-2 {
+    animation: fadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) 0.2s forwards;
+    opacity: 0;
+  }
+
+  .animate-fade-up-delay-3 {
+    animation: fadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) 0.3s forwards;
+    opacity: 0;
+  }
+
+  /* 浮動動畫 */
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+
+  .animate-float-slow {
+    animation: float 5s ease-in-out infinite;
+  }
+
+  /* 脈衝發光 */
+  .animate-pulse-glow {
+    animation: pulseGlow 2s ease-in-out infinite;
+  }
+
+  /* 縮放彈跳 */
+  .animate-bounce-in {
+    animation: bounceIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+  }
+
+  /* 漸層背景動畫 */
+  .animate-gradient {
+    background-size: 200% 200%;
+    animation: gradientShift 8s ease infinite;
+  }
+
+  /* 數字滾動效果（用於統計數字） */
+  .animate-count-up {
+    animation: countUp 1s ease-out forwards;
+  }
 }
 
 @layer components {
@@ -181,5 +233,88 @@
 
   100% {
     background-position: -200% 0;
+  }
+}
+
+/* ===== 全站動效 Keyframes ===== */
+
+@keyframes fadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes pulseGlow {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 oklch(72% 0.18 48 / 0.4);
+  }
+
+  50% {
+    box-shadow: 0 0 20px 10px oklch(72% 0.18 48 / 0);
+  }
+}
+
+@keyframes bounceIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+
+  50% {
+    transform: scale(1.05);
+  }
+
+  70% {
+    transform: scale(0.95);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes gradientShift {
+
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* 數字計數動畫（配合 JS 使用） */
+@keyframes countUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
