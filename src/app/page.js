@@ -138,7 +138,7 @@ export default async function LandingPage({ searchParams }) {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center px-6">
             <a
-              href="https://liff.line.me/1645278921-kWRPP32q/?accountId=hu._escaperoom"
+              href="https://line.me/ti/g2/04aicsfxOcNA2fRhxM1vn07e6JieIO7EqKbQZg?utm_source=invitation&utm_medium=link_copy&utm_campaign=default"
               target="_blank"
               rel="noopener noreferrer"
               className="btn-secondary flex items-center justify-center gap-3 px-8 text-lg"

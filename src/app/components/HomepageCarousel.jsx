@@ -13,12 +13,12 @@ function toYoutubeEmbed(url) {
   if (typeof url !== 'string' || url.startsWith('data:image/') || url.startsWith('data:video/')) {
     return null;
   }
-  
+
   try {
     const parsed = new URL(url);
     const hostname = parsed.hostname.replace('www.', '').replace('m.', '');
     let videoId = null;
-    
+
     // 支援多種 YouTube URL 格式
     if (hostname === 'youtube.com' || hostname === 'youtu.be') {
       // 格式 1: youtube.com/watch?v=VIDEO_ID
@@ -29,17 +29,17 @@ function toYoutubeEmbed(url) {
         videoId = parsed.pathname.split('/embed/')[1]?.split('?')[0];
       } else if (parsed.pathname.includes('/v/')) {
         videoId = parsed.pathname.split('/v/')[1]?.split('?')[0];
-      } else if (parsed.hostname === 'youtu.be' || parsed.hostname.includes('youtu.be')) {
+      } else if (hostname === 'youtu.be') {
         videoId = parsed.pathname.replace(/^\//, '').split('?')[0];
       } else {
         videoId = parsed.searchParams.get('v');
       }
-      
+
       if (videoId) {
         // 提取時間戳（如果有）
         const t = parsed.searchParams.get('t');
         const timeParam = t ? `&start=${parseInt(t)}` : '';
-        
+
         // 構建 embed URL，支援自動播放、靜音、循環播放
         return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=1&rel=0${timeParam}`;
       }
@@ -52,7 +52,7 @@ function toYoutubeEmbed(url) {
 
 function buildSlide(url, index) {
   if (!url || typeof url !== 'string') return null;
-  
+
   const embed = toYoutubeEmbed(url);
   return {
     id: `${index}-${url.substring(0, 50)}`,
@@ -79,7 +79,7 @@ export default function HomepageCarousel() {
   const [status, setStatus] = useState('loading');
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
-  
+
   const slides = useMemo(() => {
     if (!Array.isArray(sources)) return [];
     return sources
@@ -88,7 +88,7 @@ export default function HomepageCarousel() {
   }, [sources]);
 
   const [active, setActive] = useState(0);
-  
+
   // 當切換 slide 時重置載入狀態（僅針對圖片）
   useEffect(() => {
     const currentSlide = slides[active];
@@ -107,7 +107,7 @@ export default function HomepageCarousel() {
     async function loadData() {
       // 先檢查版本時間，決定是否需要更新
       const needsUpdate = await shouldUpdateCache(CACHE_KEY);
-      
+
       if (needsUpdate && !cancelled) {
         // 需要更新：直接載入最新數據
         setStatus('loading');
