@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { readCache, writeCache, shouldUpdateCache } from '@/lib/clientCache';
 
 const CACHE_KEY = 'sheet-cache:homepage';
 // 快取時間：一個禮拜（7天）
 const CACHE_TTL = Number(process.env.NEXT_PUBLIC_SHEET_CACHE_TTL_MS || 7 * 24 * 60 * 60 * 1000);
-// 圖片顯示時間（秒）
+// 圖片顯示時間（毫秒）
 const IMAGE_DISPLAY_TIME = 6000;
 
 // 從 URL 提取 YouTube video ID
@@ -21,11 +21,6 @@ function extractVideoId(url) {
     const hostname = parsed.hostname.replace('www.', '').replace('m.', '');
 
     if (hostname === 'youtube.com' || hostname === 'youtu.be') {
-      // 格式 1: youtube.com/watch?v=VIDEO_ID
-      // 格式 2: youtube.com/embed/VIDEO_ID
-      // 格式 3: youtube.com/v/VIDEO_ID
-      // 格式 4: youtu.be/VIDEO_ID
-      // 格式 5: youtube.com/shorts/VIDEO_ID
       if (parsed.pathname.includes('/embed/')) {
         return parsed.pathname.split('/embed/')[1]?.split('?')[0];
       } else if (parsed.pathname.includes('/v/')) {
@@ -75,9 +70,8 @@ export default function HomepageCarousel() {
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [active, setActive] = useState(0);
-  const playerRef = useRef(null);
-  const playerContainerRef = useRef(null);
   const timerRef = useRef(null);
+  const iframeRef = useRef(null);
 
   const slides = useMemo(() => {
     if (!Array.isArray(sources)) return [];
@@ -92,37 +86,32 @@ export default function HomepageCarousel() {
     setActive((prev) => (prev + 1) % slides.length);
   }, [slides.length]);
 
-  // 當切換 slide 時重置載入狀態（僅針對圖片）
-  useEffect(() => {
-    const currentSlide = slides[active];
-    if (currentSlide?.type === 'image') {
-      setImageLoading(true);
-      setImageError(false);
-    } else {
-      setImageLoading(false);
-      setImageError(false);
-    }
-  }, [active, slides]);
-
-  // 載入 YouTube IFrame API
+  // 監聽 YouTube postMessage 事件（影片結束）
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // 如果 API 已經載入，不需要再次載入
-    if (window.YT && window.YT.Player) return;
+    const handleMessage = (event) => {
+      // 確保是來自 YouTube 的訊息
+      if (!event.origin.includes('youtube.com')) return;
 
-    // 載入 YouTube IFrame API
-    const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    const firstScriptTag = document.getElementsByTagName('script')[0];
-    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-  }, []);
+      try {
+        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
 
-  // 處理 YouTube 播放器的建立與事件
+        // 當影片狀態變為結束 (0) 時跳到下一個
+        if (data.event === 'onStateChange' && data.info === 0) {
+          goToNext();
+        }
+      } catch {
+        // 忽略解析錯誤
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [goToNext]);
+
+  // 當切換 slide 時重置載入狀態
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (slides.length === 0) return;
-
     const currentSlide = slides[active];
 
     // 清除之前的計時器
@@ -131,63 +120,17 @@ export default function HomepageCarousel() {
       timerRef.current = null;
     }
 
-    // 銷毀之前的播放器
-    if (playerRef.current) {
-      try {
-        playerRef.current.destroy();
-      } catch (e) {
-        // 忽略錯誤
-      }
-      playerRef.current = null;
-    }
-
-    // 如果是圖片，設定計時器
     if (currentSlide?.type === 'image') {
+      setImageLoading(true);
+      setImageError(false);
+      // 圖片使用固定時間
       if (slides.length > 1) {
         timerRef.current = setTimeout(goToNext, IMAGE_DISPLAY_TIME);
       }
-      return;
-    }
-
-    // 如果是影片，建立 YouTube 播放器
-    if (currentSlide?.type === 'video' && currentSlide.videoId) {
-      const createPlayer = () => {
-        if (!playerContainerRef.current) return;
-        if (!window.YT || !window.YT.Player) {
-          // API 還沒載入完成，稍後再試
-          setTimeout(createPlayer, 100);
-          return;
-        }
-
-        playerRef.current = new window.YT.Player(playerContainerRef.current, {
-          videoId: currentSlide.videoId,
-          playerVars: {
-            autoplay: 1,
-            mute: 1,
-            controls: 1,
-            rel: 0,
-            modestbranding: 1,
-            playsinline: 1,
-          },
-          events: {
-            onStateChange: (event) => {
-              // YT.PlayerState.ENDED = 0
-              if (event.data === 0) {
-                // 影片結束，跳到下一個
-                goToNext();
-              }
-            },
-            onError: () => {
-              // 發生錯誤，5秒後跳到下一個
-              if (slides.length > 1) {
-                timerRef.current = setTimeout(goToNext, 5000);
-              }
-            },
-          },
-        });
-      };
-
-      createPlayer();
+    } else {
+      setImageLoading(false);
+      setImageError(false);
+      // 影片不使用固定計時器，由 postMessage 控制
     }
 
     return () => {
@@ -203,11 +146,9 @@ export default function HomepageCarousel() {
     let cancelled = false;
 
     async function loadData() {
-      // 先檢查版本時間，決定是否需要更新
       const needsUpdate = await shouldUpdateCache(CACHE_KEY);
 
       if (needsUpdate && !cancelled) {
-        // 需要更新：直接載入最新數據
         setStatus('loading');
         fetchSlidesFromApi()
           .then((data) => {
@@ -218,7 +159,6 @@ export default function HomepageCarousel() {
           })
           .catch(() => {
             if (!cancelled) {
-              // 如果載入失敗，嘗試使用快取（如果有的話）
               const fallbackCache = readCache(CACHE_KEY, CACHE_TTL);
               if (fallbackCache) {
                 setSources(fallbackCache);
@@ -229,13 +169,11 @@ export default function HomepageCarousel() {
             }
           });
       } else {
-        // 不需要更新：使用快取
         const cached = readCache(CACHE_KEY, CACHE_TTL);
         if (cached && !cancelled) {
           setSources(cached);
           setStatus('ready');
         } else {
-          // 沒有快取，需要載入
           setStatus('loading');
           fetchSlidesFromApi()
             .then((data) => {
@@ -263,13 +201,6 @@ export default function HomepageCarousel() {
     return () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
-      }
-      if (playerRef.current) {
-        try {
-          playerRef.current.destroy();
-        } catch (e) {
-          // 忽略
-        }
       }
     };
   }, []);
@@ -305,15 +236,24 @@ export default function HomepageCarousel() {
 
   const currentSlide = slides[active];
 
+  // 構建 YouTube embed URL，啟用 JS API
+  const getYoutubeEmbedUrl = (videoId) => {
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`;
+  };
+
   return (
     <div className="relative">
       <div className="aspect-video rounded-[2.5rem] overflow-hidden border border-accent-beige/30 shadow-premium bg-black relative w-full">
         {currentSlide.type === 'video' ? (
-          // YouTube 播放器容器 - 使用 div 讓 YT API 建立 iframe
-          <div
-            key={`player-${active}-${currentSlide.videoId}`}
-            ref={playerContainerRef}
-            className="w-full h-full"
+          <iframe
+            ref={iframeRef}
+            key={`video-${active}-${currentSlide.videoId}`}
+            src={getYoutubeEmbedUrl(currentSlide.videoId)}
+            title={`carousel-video-${active}`}
+            className="w-full h-full border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            loading="eager"
           />
         ) : (
           <>
@@ -374,7 +314,6 @@ export default function HomepageCarousel() {
           </div>
         </>
       )}
-
     </div>
   );
 }
