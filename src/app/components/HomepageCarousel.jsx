@@ -25,10 +25,13 @@ function toYoutubeEmbed(url) {
       // 格式 2: youtube.com/embed/VIDEO_ID
       // 格式 3: youtube.com/v/VIDEO_ID
       // 格式 4: youtu.be/VIDEO_ID
+      // 格式 5: youtube.com/shorts/VIDEO_ID
       if (parsed.pathname.includes('/embed/')) {
         videoId = parsed.pathname.split('/embed/')[1]?.split('?')[0];
       } else if (parsed.pathname.includes('/v/')) {
         videoId = parsed.pathname.split('/v/')[1]?.split('?')[0];
+      } else if (parsed.pathname.includes('/shorts/')) {
+        videoId = parsed.pathname.split('/shorts/')[1]?.split('?')[0];
       } else if (hostname === 'youtu.be') {
         videoId = parsed.pathname.replace(/^\//, '').split('?')[0];
       } else {
