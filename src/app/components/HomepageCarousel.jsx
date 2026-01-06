@@ -72,8 +72,10 @@ export default function HomepageCarousel() {
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [active, setActive] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const timerRef = useRef(null);
   const iframeRef = useRef(null);
+  const progressKey = useRef(0);
 
   const slides = useMemo(() => {
     if (!Array.isArray(sources)) return [];
@@ -82,13 +84,40 @@ export default function HomepageCarousel() {
       .filter((slide) => !!slide);
   }, [sources]);
 
-  // 跳到下一個 slide
+  // 跳到下一個 slide（帶動畫）
   const goToNext = useCallback(() => {
     if (slides.length <= 1) return;
-    setActive((prev) => (prev + 1) % slides.length);
+    setIsTransitioning(true);
+    setTimeout(() => {
+      setActive((prev) => (prev + 1) % slides.length);
+      progressKey.current += 1;
+      setIsTransitioning(false);
+    }, 150);
   }, [slides.length]);
 
-  // 監聯 YouTube postMessage 事件（影片結束）
+  // 跳到前一個 slide（帶動畫）
+  const goToPrev = useCallback(() => {
+    if (slides.length <= 1) return;
+    setIsTransitioning(true);
+    setTimeout(() => {
+      setActive((prev) => (prev === 0 ? slides.length - 1 : prev - 1));
+      progressKey.current += 1;
+      setIsTransitioning(false);
+    }, 150);
+  }, [slides.length]);
+
+  // 跳到指定 slide（帶動畫）
+  const goToSlide = useCallback((index) => {
+    if (index === active) return;
+    setIsTransitioning(true);
+    setTimeout(() => {
+      setActive(index);
+      progressKey.current += 1;
+      setIsTransitioning(false);
+    }, 150);
+  }, [active]);
+
+  // 監聽 YouTube postMessage 事件（影片結束）
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -237,8 +266,14 @@ export default function HomepageCarousel() {
 
   if (status === 'loading') {
     return (
-      <div className="aspect-video rounded-[2.5rem] border border-accent-beige/30 bg-white/70 flex items-center justify-center text-text-secondary text-sm animate-pulse">
-        載入首頁內容…
+      <div className="aspect-video rounded-[2.5rem] border border-accent-beige/30 overflow-hidden relative">
+        <div className="absolute inset-0 carousel-loading-shimmer" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex items-center gap-3 text-text-secondary text-sm">
+            <div className="w-5 h-5 border-2 border-accent-orange/30 border-t-accent-orange rounded-full animate-spin" />
+            載入首頁內容…
+          </div>
+        </div>
       </div>
     );
   }
@@ -273,78 +308,114 @@ export default function HomepageCarousel() {
   };
 
   return (
-    <div className="relative">
+    <div className="relative group">
+      {/* 主要輪播區域 */}
       <div className="aspect-video rounded-[2.5rem] overflow-hidden border border-accent-beige/30 shadow-premium bg-black relative w-full">
-        {currentSlide.type === 'video' ? (
-          <iframe
-            ref={iframeRef}
-            key={`video-${active}-${currentSlide.videoId}`}
-            src={getYoutubeEmbedUrl(currentSlide.videoId)}
-            title={`carousel-video-${active}`}
-            className="w-full h-full border-0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            loading="eager"
-            onLoad={handleIframeLoad}
-          />
-        ) : (
-          <>
-            {imageLoading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-                <div className="text-white text-sm">載入中...</div>
-              </div>
-            )}
-            <img
-              key={currentSlide.id}
-              src={currentSlide.src}
-              alt={`carousel-${active}`}
-              className="w-full h-full object-contain object-center"
-              onError={() => {
-                setImageError(true);
-                setImageLoading(false);
-              }}
-              onLoad={() => {
-                setImageError(false);
-                setImageLoading(false);
-              }}
+        {/* 內容切換動畫容器 */}
+        <div
+          className={`w-full h-full transition-all duration-300 ease-out ${isTransitioning ? 'opacity-0 scale-[1.02]' : 'opacity-100 scale-100'
+            }`}
+        >
+          {currentSlide.type === 'video' ? (
+            <iframe
+              ref={iframeRef}
+              key={`video-${active}-${currentSlide.videoId}`}
+              src={getYoutubeEmbedUrl(currentSlide.videoId)}
+              title={`carousel-video-${active}`}
+              className="w-full h-full border-0 carousel-slide-enter"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              loading="eager"
+              onLoad={handleIframeLoad}
             />
-            {!imageLoading && (
-              <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/40 pointer-events-none" />
-            )}
-          </>
+          ) : (
+            <>
+              {imageLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+                  <div className="flex items-center gap-3 text-white text-sm">
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    載入中...
+                  </div>
+                </div>
+              )}
+              <div className="w-full h-full overflow-hidden">
+                <img
+                  key={currentSlide.id}
+                  src={currentSlide.src}
+                  alt={`carousel-${active}`}
+                  className="w-full h-full object-contain object-center carousel-slide-enter carousel-slide-image"
+                  onError={() => {
+                    setImageError(true);
+                    setImageLoading(false);
+                  }}
+                  onLoad={() => {
+                    setImageError(false);
+                    setImageLoading(false);
+                  }}
+                />
+              </div>
+              {!imageLoading && (
+                <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30 pointer-events-none transition-opacity duration-500" />
+              )}
+            </>
+          )}
+        </div>
+
+        {/* 進度條（僅圖片時顯示） */}
+        {currentSlide.type === 'image' && slides.length > 1 && !imageLoading && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+            <div
+              key={`progress-${progressKey.current}`}
+              className="h-full bg-white/80 carousel-progress"
+              style={{ '--progress-duration': `${IMAGE_DISPLAY_TIME}ms` }}
+            />
+          </div>
         )}
       </div>
 
+      {/* 導航按鈕 - hover 時顯示 */}
       {slides.length > 1 && (
         <>
           <button
             type="button"
             aria-label="上一張"
-            onClick={() => setActive((prev) => (prev === 0 ? slides.length - 1 : prev - 1))}
-            className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 hover:bg-white text-text-primary p-3 shadow-lg"
+            onClick={goToPrev}
+            className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 hover:bg-white text-text-primary p-3 shadow-lg carousel-nav-btn opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0"
           >
             <ChevronLeft size={20} />
           </button>
           <button
             type="button"
             aria-label="下一張"
-            onClick={() => setActive((prev) => (prev + 1) % slides.length)}
-            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 hover:bg-white text-text-primary p-3 shadow-lg"
+            onClick={goToNext}
+            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 hover:bg-white text-text-primary p-3 shadow-lg carousel-nav-btn opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0"
           >
             <ChevronRight size={20} />
           </button>
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2">
+
+          {/* 指示點 */}
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2.5 px-4 py-2 rounded-full bg-black/30 backdrop-blur-sm">
             {slides.map((slide, index) => (
               <button
                 type="button"
                 key={slide.id}
-                className={`w-3 h-3 rounded-full border border-white/70 transition-all ${active === index ? 'bg-white scale-110' : 'bg-transparent'}`}
-                onClick={() => setActive(index)}
+                className={`w-2.5 h-2.5 rounded-full border border-white/50 carousel-dot ${active === index
+                    ? 'bg-white carousel-dot-active'
+                    : 'bg-white/30 hover:bg-white/60'
+                  }`}
+                onClick={() => goToSlide(index)}
                 aria-label={`切換至第 ${index + 1} 張`}
               />
             ))}
           </div>
         </>
+      )}
+
+      {/* 計數器標籤 */}
+      {slides.length > 1 && (
+        <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          {active + 1} / {slides.length}
+        </div>
       )}
     </div>
   );

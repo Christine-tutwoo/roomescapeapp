@@ -89,4 +89,97 @@
   .card-premium {
     @apply bg-white border border-accent-beige/30 rounded-2xl shadow-premium transition-all duration-500 hover:shadow-[0_20px_40px_-15px_oklch(0%_0_0_/_0.12)] hover:-translate-y-1;
   }
+
+  /* 輪播動效 - Carousel Animations */
+  .carousel-slide-enter {
+    animation: carouselFadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  .carousel-slide-image {
+    animation: carouselZoomIn 6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  .carousel-nav-btn {
+    @apply transition-all duration-300 ease-out;
+    @apply hover:scale-110 hover:shadow-xl;
+    @apply active:scale-95;
+    @apply backdrop-blur-sm;
+  }
+
+  .carousel-dot {
+    @apply transition-all duration-300 ease-out;
+  }
+
+  .carousel-dot-active {
+    @apply scale-125 shadow-[0_0_8px_oklch(100%_0_0_/_0.6)];
+  }
+
+  .carousel-progress {
+    animation: carouselProgress var(--progress-duration, 6s) linear forwards;
+  }
+}
+
+/* 輪播動畫 Keyframes */
+@keyframes carouselFadeIn {
+  0% {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes carouselZoomIn {
+  0% {
+    transform: scale(1);
+  }
+
+  100% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes carouselProgress {
+  0% {
+    width: 0%;
+  }
+
+  100% {
+    width: 100%;
+  }
+}
+
+/* 脈衝動畫 - 用於載入中狀態 */
+@keyframes carouselPulse {
+
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.carousel-loading-shimmer {
+  background: linear-gradient(90deg,
+      oklch(90% 0.01 45) 0%,
+      oklch(95% 0.005 45) 50%,
+      oklch(90% 0.01 45) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
 }
