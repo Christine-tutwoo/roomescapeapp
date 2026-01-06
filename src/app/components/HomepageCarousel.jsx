@@ -9,6 +9,8 @@ const CACHE_KEY = 'sheet-cache:homepage';
 const CACHE_TTL = Number(process.env.NEXT_PUBLIC_SHEET_CACHE_TTL_MS || 7 * 24 * 60 * 60 * 1000);
 // 圖片顯示時間（毫秒）
 const IMAGE_DISPLAY_TIME = 6000;
+// 影片最大等待時間（毫秒）- 作為備援，防止 postMessage 失效
+const VIDEO_MAX_WAIT_TIME = 120000; // 2 分鐘
 
 // 從 URL 提取 YouTube video ID
 function extractVideoId(url) {
@@ -86,7 +88,7 @@ export default function HomepageCarousel() {
     setActive((prev) => (prev + 1) % slides.length);
   }, [slides.length]);
 
-  // 監聽 YouTube postMessage 事件（影片結束）
+  // 監聯 YouTube postMessage 事件（影片結束）
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -99,6 +101,11 @@ export default function HomepageCarousel() {
 
         // 當影片狀態變為結束 (0) 時跳到下一個
         if (data.event === 'onStateChange' && data.info === 0) {
+          // 清除備援計時器
+          if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+          }
           goToNext();
         }
       } catch {
@@ -109,6 +116,26 @@ export default function HomepageCarousel() {
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [goToNext]);
+
+  // iframe 載入後初始化 postMessage 監聽
+  const handleIframeLoad = useCallback(() => {
+    if (!iframeRef.current) return;
+
+    try {
+      // 發送 listening 命令讓 YouTube 開始廣播狀態變更
+      iframeRef.current.contentWindow?.postMessage(
+        JSON.stringify({ event: 'listening' }),
+        '*'
+      );
+      // 也發送 command 來訂閱狀態變更
+      iframeRef.current.contentWindow?.postMessage(
+        JSON.stringify({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }),
+        '*'
+      );
+    } catch {
+      // 忽略跨域錯誤
+    }
+  }, []);
 
   // 當切換 slide 時重置載入狀態
   useEffect(() => {
@@ -127,10 +154,13 @@ export default function HomepageCarousel() {
       if (slides.length > 1) {
         timerRef.current = setTimeout(goToNext, IMAGE_DISPLAY_TIME);
       }
-    } else {
+    } else if (currentSlide?.type === 'video') {
       setImageLoading(false);
       setImageError(false);
-      // 影片不使用固定計時器，由 postMessage 控制
+      // 影片設置備援計時器，防止 postMessage 失效
+      if (slides.length > 1) {
+        timerRef.current = setTimeout(goToNext, VIDEO_MAX_WAIT_TIME);
+      }
     }
 
     return () => {
@@ -238,7 +268,8 @@ export default function HomepageCarousel() {
 
   // 構建 YouTube embed URL，啟用 JS API
   const getYoutubeEmbedUrl = (videoId) => {
-    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${typeof window !== 'undefined' ? window.location.origin : ''}`;
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(origin)}`;
   };
 
   return (
@@ -254,6 +285,7 @@ export default function HomepageCarousel() {
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
             loading="eager"
+            onLoad={handleIframeLoad}
           />
         ) : (
           <>
