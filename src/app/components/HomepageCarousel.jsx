@@ -1,15 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
 import { readCache, writeCache, shouldUpdateCache } from '@/lib/clientCache';
 
 const CACHE_KEY = 'sheet-cache:homepage';
 // 快取時間：一個禮拜（7天）
 const CACHE_TTL = Number(process.env.NEXT_PUBLIC_SHEET_CACHE_TTL_MS || 7 * 24 * 60 * 60 * 1000);
+// 圖片顯示時間（秒）
+const IMAGE_DISPLAY_TIME = 6000;
 
-function toYoutubeEmbed(url) {
-  // 如果是 base64 data URL，直接返回 null（不是 YouTube）
+// 從 URL 提取 YouTube video ID
+function extractVideoId(url) {
   if (typeof url !== 'string' || url.startsWith('data:image/') || url.startsWith('data:video/')) {
     return null;
   }
@@ -17,9 +19,7 @@ function toYoutubeEmbed(url) {
   try {
     const parsed = new URL(url);
     const hostname = parsed.hostname.replace('www.', '').replace('m.', '');
-    let videoId = null;
 
-    // 支援多種 YouTube URL 格式
     if (hostname === 'youtube.com' || hostname === 'youtu.be') {
       // 格式 1: youtube.com/watch?v=VIDEO_ID
       // 格式 2: youtube.com/embed/VIDEO_ID
@@ -27,28 +27,19 @@ function toYoutubeEmbed(url) {
       // 格式 4: youtu.be/VIDEO_ID
       // 格式 5: youtube.com/shorts/VIDEO_ID
       if (parsed.pathname.includes('/embed/')) {
-        videoId = parsed.pathname.split('/embed/')[1]?.split('?')[0];
+        return parsed.pathname.split('/embed/')[1]?.split('?')[0];
       } else if (parsed.pathname.includes('/v/')) {
-        videoId = parsed.pathname.split('/v/')[1]?.split('?')[0];
+        return parsed.pathname.split('/v/')[1]?.split('?')[0];
       } else if (parsed.pathname.includes('/shorts/')) {
-        videoId = parsed.pathname.split('/shorts/')[1]?.split('?')[0];
+        return parsed.pathname.split('/shorts/')[1]?.split('?')[0];
       } else if (hostname === 'youtu.be') {
-        videoId = parsed.pathname.replace(/^\//, '').split('?')[0];
+        return parsed.pathname.replace(/^\//, '').split('?')[0];
       } else {
-        videoId = parsed.searchParams.get('v');
-      }
-
-      if (videoId) {
-        // 提取時間戳（如果有）
-        const t = parsed.searchParams.get('t');
-        const timeParam = t ? `&start=${parseInt(t)}` : '';
-
-        // 構建 embed URL，支援自動播放、靜音、循環播放
-        return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=1&rel=0${timeParam}`;
+        return parsed.searchParams.get('v');
       }
     }
   } catch {
-    // URL 解析失敗（可能是 base64 data URL 或其他格式）
+    // URL 解析失敗
   }
   return null;
 }
@@ -56,11 +47,12 @@ function toYoutubeEmbed(url) {
 function buildSlide(url, index) {
   if (!url || typeof url !== 'string') return null;
 
-  const embed = toYoutubeEmbed(url);
+  const videoId = extractVideoId(url);
   return {
     id: `${index}-${url.substring(0, 50)}`,
-    type: embed ? 'video' : 'image',
-    src: embed || url,
+    type: videoId ? 'video' : 'image',
+    videoId: videoId,
+    src: url,
     original: url,
   };
 }
@@ -82,6 +74,10 @@ export default function HomepageCarousel() {
   const [status, setStatus] = useState('loading');
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
+  const [active, setActive] = useState(0);
+  const playerRef = useRef(null);
+  const playerContainerRef = useRef(null);
+  const timerRef = useRef(null);
 
   const slides = useMemo(() => {
     if (!Array.isArray(sources)) return [];
@@ -90,7 +86,11 @@ export default function HomepageCarousel() {
       .filter((slide) => !!slide);
   }, [sources]);
 
-  const [active, setActive] = useState(0);
+  // 跳到下一個 slide
+  const goToNext = useCallback(() => {
+    if (slides.length <= 1) return;
+    setActive((prev) => (prev + 1) % slides.length);
+  }, [slides.length]);
 
   // 當切換 slide 時重置載入狀態（僅針對圖片）
   useEffect(() => {
@@ -104,6 +104,101 @@ export default function HomepageCarousel() {
     }
   }, [active, slides]);
 
+  // 載入 YouTube IFrame API
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // 如果 API 已經載入，不需要再次載入
+    if (window.YT && window.YT.Player) return;
+
+    // 載入 YouTube IFrame API
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    const firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+  }, []);
+
+  // 處理 YouTube 播放器的建立與事件
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (slides.length === 0) return;
+
+    const currentSlide = slides[active];
+
+    // 清除之前的計時器
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // 銷毀之前的播放器
+    if (playerRef.current) {
+      try {
+        playerRef.current.destroy();
+      } catch (e) {
+        // 忽略錯誤
+      }
+      playerRef.current = null;
+    }
+
+    // 如果是圖片，設定計時器
+    if (currentSlide?.type === 'image') {
+      if (slides.length > 1) {
+        timerRef.current = setTimeout(goToNext, IMAGE_DISPLAY_TIME);
+      }
+      return;
+    }
+
+    // 如果是影片，建立 YouTube 播放器
+    if (currentSlide?.type === 'video' && currentSlide.videoId) {
+      const createPlayer = () => {
+        if (!playerContainerRef.current) return;
+        if (!window.YT || !window.YT.Player) {
+          // API 還沒載入完成，稍後再試
+          setTimeout(createPlayer, 100);
+          return;
+        }
+
+        playerRef.current = new window.YT.Player(playerContainerRef.current, {
+          videoId: currentSlide.videoId,
+          playerVars: {
+            autoplay: 1,
+            mute: 1,
+            controls: 1,
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1,
+          },
+          events: {
+            onStateChange: (event) => {
+              // YT.PlayerState.ENDED = 0
+              if (event.data === 0) {
+                // 影片結束，跳到下一個
+                goToNext();
+              }
+            },
+            onError: () => {
+              // 發生錯誤，5秒後跳到下一個
+              if (slides.length > 1) {
+                timerRef.current = setTimeout(goToNext, 5000);
+              }
+            },
+          },
+        });
+      };
+
+      createPlayer();
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [active, slides, goToNext]);
+
+  // 載入資料
   useEffect(() => {
     let cancelled = false;
 
@@ -163,13 +258,21 @@ export default function HomepageCarousel() {
     };
   }, []);
 
+  // 元件卸載時清理
   useEffect(() => {
-    if (slides.length <= 1) return undefined;
-    const timer = setInterval(() => {
-      setActive((prev) => (prev + 1) % slides.length);
-    }, 6000);
-    return () => clearInterval(timer);
-  }, [slides.length]);
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+      if (playerRef.current) {
+        try {
+          playerRef.current.destroy();
+        } catch (e) {
+          // 忽略
+        }
+      }
+    };
+  }, []);
 
   if (status === 'loading') {
     return (
@@ -206,15 +309,11 @@ export default function HomepageCarousel() {
     <div className="relative">
       <div className="aspect-video rounded-[2.5rem] overflow-hidden border border-accent-beige/30 shadow-premium bg-black relative w-full">
         {currentSlide.type === 'video' ? (
-          <iframe
-            key={currentSlide.id}
-            src={currentSlide.src}
-            title={`carousel-video-${active}`}
-            className="w-full h-full border-0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            frameBorder="0"
-            loading="lazy"
+          // YouTube 播放器容器 - 使用 div 讓 YT API 建立 iframe
+          <div
+            key={`player-${active}-${currentSlide.videoId}`}
+            ref={playerContainerRef}
+            className="w-full h-full"
           />
         ) : (
           <>
@@ -279,4 +378,3 @@ export default function HomepageCarousel() {
     </div>
   );
 }
-
