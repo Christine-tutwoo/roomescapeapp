@@ -445,6 +445,8 @@ export default function ProfilePage() {
     const totalSlots = Number(editEventForm.totalSlots);
     const price = Number(editEventForm.price);
     const priceFull = editEventForm.priceFull === '' ? price : Number(editEventForm.priceFull);
+    const builtInRaw = Number(editEventForm.builtInPlayers);
+    const builtInPlayers = Number.isFinite(builtInRaw) ? Math.max(0, Math.floor(builtInRaw)) : 0;
 
     if (!title || !studio || !location || !date || !time) {
       showToast('請填寫必填欄位', 'error');
@@ -465,6 +467,10 @@ export default function ProfilePage() {
     }
     if (!Number.isFinite(priceFull) || priceFull < 0) {
       showToast('滿團優惠價需為 0 或正整數', 'error');
+      return;
+    }
+    if (builtInPlayers >= totalSlots) {
+      showToast('內建人數需小於總人數，且不可為負', 'error');
       return;
     }
 
@@ -488,7 +494,7 @@ export default function ProfilePage() {
         meetingTime: Number(editEventForm.meetingTime) || 15,
         duration: Number(editEventForm.duration) || 120,
         minPlayers: Number(editEventForm.minPlayers) || 4,
-        builtInPlayers: editEventForm.builtInPlayers.trim(),
+        builtInPlayers,
       });
       showToast('活動已更新', 'success');
       closeEditEventModal();
@@ -843,6 +849,19 @@ export default function ProfilePage() {
                     value={editEventForm.totalSlots}
                     onChange={(e) => setEditEventForm((p) => ({ ...p, totalSlots: e.target.value }))}
                   />
+                </div>
+                <div className="space-y-1.5 col-span-2 md:col-span-1">
+                  <label className="text-sm text-[#7A7A7A] font-medium">內建人數（選填）</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
+                    value={editEventForm.builtInPlayers}
+                    onChange={(e) => setEditEventForm((p) => ({ ...p, builtInPlayers: e.target.value }))}
+                    placeholder="已有隊友人數"
+                  />
+                  <p className="text-xs text-[#B1977A]">系統會預留位置，並於列表顯示主揪已佔位置人數。</p>
                 </div>
                 <div className="space-y-1.5 col-span-2 md:col-span-1">
                   <label className="text-sm text-[#7A7A7A] font-medium">主揪社群名稱（參加後可見）</label>

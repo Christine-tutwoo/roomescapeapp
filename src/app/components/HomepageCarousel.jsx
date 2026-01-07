@@ -73,8 +73,9 @@ export default function HomepageCarousel() {
   const [imageLoading, setImageLoading] = useState(true);
   const [active, setActive] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isYouTubeReady, setIsYouTubeReady] = useState(false);
   const timerRef = useRef(null);
-  const iframeRef = useRef(null);
+  const playerRef = useRef(null);
   const progressKey = useRef(0);
 
   const slides = useMemo(() => {
@@ -117,54 +118,95 @@ export default function HomepageCarousel() {
     }, 150);
   }, [active]);
 
-  // 監聽 YouTube postMessage 事件（影片結束）
+  // 載入 YouTube IFrame API
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    let cancelled = false;
 
-    const handleMessage = (event) => {
-      // 確保是來自 YouTube 的訊息
-      if (!event.origin.includes('youtube.com')) return;
-
-      try {
-        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-
-        // 當影片狀態變為結束 (0) 時跳到下一個
-        if (data.event === 'onStateChange' && data.info === 0) {
-          // 清除備援計時器
-          if (timerRef.current) {
-            clearTimeout(timerRef.current);
-            timerRef.current = null;
-          }
-          goToNext();
-        }
-      } catch {
-        // 忽略解析錯誤
+    const markReady = () => {
+      if (!cancelled) {
+        setIsYouTubeReady(true);
       }
     };
 
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [goToNext]);
-
-  // iframe 載入後初始化 postMessage 監聽
-  const handleIframeLoad = useCallback(() => {
-    if (!iframeRef.current) return;
-
-    try {
-      // 發送 listening 命令讓 YouTube 開始廣播狀態變更
-      iframeRef.current.contentWindow?.postMessage(
-        JSON.stringify({ event: 'listening' }),
-        '*'
-      );
-      // 也發送 command 來訂閱狀態變更
-      iframeRef.current.contentWindow?.postMessage(
-        JSON.stringify({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }),
-        '*'
-      );
-    } catch {
-      // 忽略跨域錯誤
+    if (window.YT && window.YT.Player) {
+      markReady();
+      return;
     }
+
+    const previousHandler = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      previousHandler?.();
+      markReady();
+    };
+
+    if (!document.getElementById('youtube-iframe-api')) {
+      const script = document.createElement('script');
+      script.id = 'youtube-iframe-api';
+      script.src = 'https://www.youtube.com/iframe_api';
+      script.async = true;
+      document.body.appendChild(script);
+    }
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // 建立 / 銷毀 YouTube Player
+  useEffect(() => {
+    const currentSlide = slides[active];
+    if (!isYouTubeReady || currentSlide?.type !== 'video') {
+      if (playerRef.current) {
+        playerRef.current.destroy();
+        playerRef.current = null;
+      }
+      return;
+    }
+
+    const containerId = `carousel-video-${currentSlide.videoId}`;
+    // 若 DOM 尚未渲染，稍後再試
+    const containerEl = document.getElementById(containerId);
+    if (!containerEl) return;
+
+    playerRef.current = new window.YT.Player(containerId, {
+      videoId: currentSlide.videoId,
+      playerVars: {
+        autoplay: 1,
+        mute: 1,
+        controls: 1,
+        rel: 0,
+        modestbranding: 1,
+        playsinline: 1,
+      },
+      events: {
+        onReady: (event) => {
+          try {
+            event.target.mute();
+            event.target.playVideo();
+          } catch {
+            // ignore
+          }
+        },
+        onStateChange: (event) => {
+          if (event.data === window.YT.PlayerState.ENDED) {
+            if (timerRef.current) {
+              clearTimeout(timerRef.current);
+              timerRef.current = null;
+            }
+            goToNext();
+          }
+        },
+      },
+    });
+
+    return () => {
+      if (playerRef.current) {
+        playerRef.current.destroy();
+        playerRef.current = null;
+      }
+    };
+  }, [active, slides, isYouTubeReady, goToNext]);
 
   // 當切換 slide 時重置載入狀態
   useEffect(() => {
@@ -301,11 +343,7 @@ export default function HomepageCarousel() {
 
   const currentSlide = slides[active];
 
-  // 構建 YouTube embed URL，啟用 JS API
-  const getYoutubeEmbedUrl = (videoId) => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(origin)}`;
-  };
+  const videoContainerId = currentSlide.type === 'video' ? `carousel-video-${currentSlide.videoId}` : null;
 
   return (
     <div className="relative group">
@@ -317,17 +355,14 @@ export default function HomepageCarousel() {
             }`}
         >
           {currentSlide.type === 'video' ? (
-            <iframe
-              ref={iframeRef}
-              key={`video-${active}-${currentSlide.videoId}`}
-              src={getYoutubeEmbedUrl(currentSlide.videoId)}
-              title={`carousel-video-${active}`}
-              className="w-full h-full border-0 carousel-slide-enter"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-              loading="eager"
-              onLoad={handleIframeLoad}
-            />
+            <div className="w-full h-full relative" key={`video-${active}-${currentSlide.videoId}`}>
+              {!isYouTubeReady && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white text-sm z-10">
+                  影片載入中…
+                </div>
+              )}
+              <div id={videoContainerId} className="w-full h-full" />
+            </div>
           ) : (
             <>
               {imageLoading && (
