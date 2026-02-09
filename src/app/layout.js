@@ -1,15 +1,19 @@
-import { Inter, Outfit } from "next/font/google";
+import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
-
 const outfit = Outfit({
+  weight: ["400", "500", "700", "800"],
   variable: "--font-outfit",
   subsets: ["latin"],
+  display: "swap",
+});
+
+const plusJakartaSans = Plus_Jakarta_Sans({
+  weight: ["400", "500"],
+  variable: "--font-plus-jakarta",
+  subsets: ["latin"],
+  display: "swap",
 });
 
 
@@ -177,7 +181,7 @@ export default function RootLayout({ children }) {
         />
       </head>
       <body
-        className={`${inter.variable} ${outfit.variable} antialiased`}
+        className={`${outfit.variable} ${plusJakartaSans.variable} antialiased`}
       >
         {children}
 

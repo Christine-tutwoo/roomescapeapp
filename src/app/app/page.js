@@ -141,6 +141,8 @@ const sanitizePriceValue = (value, fallback = 0) => {
   if (!Number.isFinite(num)) return fallback;
   const rounded = Math.round(num);
   if (rounded < 0) return fallback;
+  // 最高金額限制：999999
+  if (rounded > 999999) return 999999;
   return rounded;
 };
 
@@ -2397,9 +2399,17 @@ ${url}
         showToast("費用需為 0 或正整數，請重新輸入", "error");
         return;
     }
+    if (normalizedPrice > 999999) {
+        showToast("費用最高為 999999，請重新輸入", "error");
+        return;
+    }
     const normalizedPriceFull = formData.priceFull !== "" && formData.priceFull !== null && formData.priceFull !== undefined
         ? sanitizePriceValue(formData.priceFull, normalizedPrice)
         : normalizedPrice;
+    if (normalizedPriceFull > 999999) {
+        showToast("滿團優惠價最高為 999999，請重新輸入", "error");
+        return;
+    }
     if (createMode === 'event') {
         const limitDate = new Date();
         limitDate.setFullYear(limitDate.getFullYear() + 10, limitDate.getMonth(), limitDate.getDate());
@@ -2414,11 +2424,12 @@ ${url}
                 showToast("請至少新增一場連刷場次", "error");
                 return;
             }
-            const invalidSession = formData.chainSessions.some(session => 
-                !session.title?.trim() || !session.date || !session.time || !session.price || sanitizePriceValue(session.price) < 0 || !session.studio?.trim() || !session.location?.trim()
-            );
+            const invalidSession = formData.chainSessions.some(session => {
+                const sessionPrice = sanitizePriceValue(session.price);
+                return !session.title?.trim() || !session.date || !session.time || !session.price || sessionPrice < 0 || sessionPrice > 999999 || !session.studio?.trim() || !session.location?.trim();
+            });
             if (invalidSession) {
-                showToast("連刷場次資訊不完整（主題、日期、時間、價格需為 0 或正整數、工作室、地址為必填）", "error");
+                showToast("連刷場次資訊不完整（主題、日期、時間、價格需為 0-999999 的正整數、工作室、地址為必填）", "error");
                 return;
             }
         }
@@ -2427,9 +2438,17 @@ ${url}
     const sanitizedChainSessions = hasChainSessions
         ? (formData.chainSessions || []).map(session => {
             const sessionPrice = sanitizePriceValue(session.price, normalizedPrice);
+            if (sessionPrice > 999999) {
+                showToast(`連刷場次「${session.title}」的價格超過上限 999999，請重新輸入`, "error");
+                return;
+            }
             const sessionPriceFull = session.priceFull !== "" && session.priceFull !== null && session.priceFull !== undefined
                 ? sanitizePriceValue(session.priceFull, sessionPrice)
                 : sessionPrice;
+            if (sessionPriceFull > 999999) {
+                showToast(`連刷場次「${session.title}」的滿團優惠價超過上限 999999，請重新輸入`, "error");
+                return;
+            }
         const totalSlots = Number(session.totalSlots || formData.totalSlots || 6);
             const existingParticipants = Array.isArray(session.participants) ? session.participants : [];
             const participants = existingParticipants.length > 0 ? existingParticipants : [user.uid];
@@ -2830,30 +2849,6 @@ ${url}
 
                 {!filterEventId && (
                   <>
-            <a 
-              href="https://linktr.ee/hu._escaperoom" 
-              target="_blank" 
-              rel="noopener noreferrer"
-                    className="block bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl p-4 text-white shadow-lg flex items-center justify-between group hover:brightness-110 transition-all relative overflow-hidden mb-4"
-            >
-              <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-2xl -mr-8 -mt-8"></div>
-              
-              <div className="flex items-center gap-3 relative z-10">
-                <div className="bg-white/20 p-1 rounded-full backdrop-blur-sm border border-white/20">
-                  <img 
-                    src="/logo.png" 
-                    alt="小迷糊 Logo" 
-                    className="w-14 h-14 rounded-full object-cover"
-                  />
-                </div>
-                <div>
-                  <div className="font-bold text-sm md:text-base">加入小迷糊密室社群</div>
-                  <div className="text-xs text-purple-100 mt-0.5">找隊友、聊密室、看評論 👉</div>
-                </div>
-              </div>
-              <ExternalLink size={18} className="text-purple-200 group-hover:text-white transition-colors relative z-10" />
-            </a>
-
                   {/* 進階篩選器區塊 */}
                   <div className="space-y-4 bg-slate-900/50 p-4 rounded-3xl border border-slate-800">
               
@@ -3727,16 +3722,26 @@ ${url}
                     <label className="text-sm text-slate-400 font-medium">未滿團/基本價 <span className="text-red-500">*</span></label>
                     <div className="relative">
                       <span className="absolute left-4 top-3.5 text-slate-500">$</span>
-                      <input required type="number" min="0" step="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                        value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} placeholder="600" />
+                      <input required type="number" min="0" max="999999" step="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                        value={formData.price} onChange={e => {
+                          const value = e.target.value;
+                          if (value === '' || (Number(value) >= 0 && Number(value) <= 999999)) {
+                            setFormData({...formData, price: value});
+                          }
+                        }} placeholder="600" />
                     </div>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-sm text-slate-400 font-medium">滿團優惠價 (選填)</label>
                     <div className="relative">
                       <span className="absolute left-4 top-3.5 text-slate-500">$</span>
-                      <input type="number" min="0" step="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
-                        value={formData.priceFull} onChange={e => setFormData({...formData, priceFull: e.target.value})} placeholder="550" />
+                      <input type="number" min="0" max="999999" step="1" className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-4 py-3 text-white focus:border-emerald-500 outline-none" 
+                        value={formData.priceFull} onChange={e => {
+                          const value = e.target.value;
+                          if (value === '' || (Number(value) >= 0 && Number(value) <= 999999)) {
+                            setFormData({...formData, priceFull: value});
+                          }
+                        }} placeholder="550" />
                     </div>
                   </div>
                 </div>

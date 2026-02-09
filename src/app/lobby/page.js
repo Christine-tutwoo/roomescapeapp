@@ -141,6 +141,8 @@ const sanitizePriceValue = (value, fallback = 0) => {
   if (!Number.isFinite(num)) return fallback;
   const rounded = Math.round(num);
   if (rounded < 0) return fallback;
+  // 最高金額限制：999999
+  if (rounded > 999999) return 999999;
   return rounded;
 };
 
@@ -247,6 +249,7 @@ export default function LobbyPage() {
 
   const [filterDateType, setFilterDateType] = useState('All');
   const [selectedDateFilter, setSelectedDateFilter] = useState(null); // 從日曆選中的特定日期
+  const [isFilterExpanded, setIsFilterExpanded] = useState(true); // 篩選區塊展開狀態
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
@@ -2639,9 +2642,17 @@ ${url}
       showToast("費用需為 0 或正整數，請重新輸入", "error");
       return;
     }
+    if (normalizedPrice > 999999) {
+      showToast("費用最高為 999999，請重新輸入", "error");
+      return;
+    }
     const normalizedPriceFull = formData.priceFull !== "" && formData.priceFull !== null && formData.priceFull !== undefined
       ? sanitizePriceValue(formData.priceFull, normalizedPrice)
       : normalizedPrice;
+    if (normalizedPriceFull > 999999) {
+      showToast("滿團優惠價最高為 999999，請重新輸入", "error");
+      return;
+    }
     if (createMode === 'event') {
       const limitDate = new Date();
       limitDate.setFullYear(limitDate.getFullYear() + 10, limitDate.getMonth(), limitDate.getDate());
@@ -2656,11 +2667,12 @@ ${url}
           showToast("請至少新增一場連刷場次", "error");
           return;
         }
-        const invalidSession = formData.chainSessions.some(session =>
-          !session.title?.trim() || !session.date || !session.time || !session.price || sanitizePriceValue(session.price) < 0 || !session.studio?.trim() || !session.location?.trim()
-        );
+        const invalidSession = formData.chainSessions.some(session => {
+          const sessionPrice = sanitizePriceValue(session.price);
+          return !session.title?.trim() || !session.date || !session.time || !session.price || sessionPrice < 0 || sessionPrice > 999999 || !session.studio?.trim() || !session.location?.trim();
+        });
         if (invalidSession) {
-          showToast("連刷場次資訊不完整（主題、日期、時間、價格需為 0 或正整數、工作室、地址為必填）", "error");
+          showToast("連刷場次資訊不完整（主題、日期、時間、價格需為 0-999999 的正整數、工作室、地址為必填）", "error");
           return;
         }
       }
@@ -2669,9 +2681,17 @@ ${url}
     const sanitizedChainSessions = hasChainSessions
       ? (formData.chainSessions || []).map(session => {
         const sessionPrice = sanitizePriceValue(session.price, normalizedPrice);
+        if (sessionPrice > 999999) {
+          showToast(`連刷場次「${session.title}」的價格超過上限 999999，請重新輸入`, "error");
+          return;
+        }
         const sessionPriceFull = session.priceFull !== "" && session.priceFull !== null && session.priceFull !== undefined
           ? sanitizePriceValue(session.priceFull, sessionPrice)
           : sessionPrice;
+        if (sessionPriceFull > 999999) {
+          showToast(`連刷場次「${session.title}」的滿團優惠價超過上限 999999，請重新輸入`, "error");
+          return;
+        }
         const totalSlots = Number(session.totalSlots || formData.totalSlots || 6);
         const existingParticipants = Array.isArray(session.participants) ? session.participants : [];
         const participants = existingParticipants.length > 0 ? existingParticipants : [user.uid];
@@ -3015,41 +3035,38 @@ ${url}
 
               {!filterEventId && (
                 <>
-                  <a
-                    href="https://linktr.ee/hu._escaperoom"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block bg-accent-orange rounded-2xl p-5 text-text-primary shadow-premium flex items-center justify-between group hover:brightness-105 active:scale-[0.98] transition-all relative overflow-hidden mb-6"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent pointer-events-none" />
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-white/20 rounded-full blur-3xl -mr-12 -mt-12 group-hover:scale-120 transition-transform duration-700"></div>
-
-                    <div className="flex items-center gap-4 relative z-10">
-                      <div className="bg-white/30 p-1.5 rounded-full backdrop-blur-md border border-white/40 shadow-xl">
-                        <img
-                          src="/logo.png"
-                          alt="小迷糊 Logo"
-                          className="w-14 h-14 rounded-full object-cover shadow-inner"
-                        />
+                  {/* 進階篩選器區塊 - Playful Geometric 風格 */}
+                  <div className="card-premium overflow-hidden transition-all duration-300">
+                    {/* 篩選標題和展開/收縮按鈕 */}
+                    <button
+                      onClick={() => setIsFilterExpanded(!isFilterExpanded)}
+                      className="w-full flex items-center justify-between p-5 border-b-2 border-foreground/10 hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center border-2 border-foreground" style={{ boxShadow: '4px 4px 0px 0px #1E293B' }}>
+                          <Filter size={20} className="text-accent-foreground" strokeWidth={2.5} />
+                        </div>
+                        <span className="text-lg font-bold text-foreground">篩選條件</span>
                       </div>
-                      <div>
-                        <div className="font-black font-outfit text-base md:text-lg text-text-primary tracking-tight">加入小迷糊密室社群</div>
-                        <div className="text-xs font-bold text-text-primary/70 mt-0.5 uppercase tracking-wider">找隊友、聊密室、看評論 👉</div>
-                      </div>
-                    </div>
-                    <ExternalLink size={20} className="text-text-primary group-hover:translate-x-1 transition-transform relative z-10 stroke-[2.5]" />
-                  </a>
+                      <ChevronDown 
+                        size={20} 
+                        className={`text-foreground transition-transform duration-300 ${isFilterExpanded ? 'rotate-180' : ''}`}
+                        strokeWidth={2.5}
+                      />
+                    </button>
 
-                  {/* 進階篩選器區塊 */}
-                  <div className="space-y-4 bg-bg-secondary/30 p-5 rounded-3xl border border-accent-beige/20 backdrop-blur-sm">
+                    {/* 篩選內容 - 可展開/收縮 */}
+                    <div className={`overflow-hidden transition-all duration-300 ${isFilterExpanded ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                      <div className="space-y-4 p-5">
 
-                    {/* 第一排：篩選選單 (響應式 Grid) */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                      <select
-                        value={filterCategory}
-                        onChange={(e) => setFilterCategory(e.target.value)}
-                        className="w-full bg-bg-primary/50 text-text-primary text-xs font-bold px-4 py-2.5 rounded-xl border border-accent-beige/20 outline-none focus:border-accent-orange focus:ring-1 focus:ring-accent-orange/20 appearance-none transition-all cursor-pointer"
-                      >
+                        {/* 第一排：篩選選單 (響應式 Grid) */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                          <select
+                            value={filterCategory}
+                            onChange={(e) => setFilterCategory(e.target.value)}
+                            className="w-full bg-card text-foreground text-xs font-bold px-4 py-2.5 rounded-xl border-2 border-foreground/20 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 appearance-none transition-all cursor-pointer"
+                            style={{ boxShadow: '2px 2px 0px 0px #1E293B20' }}
+                          >
                         <option value="All">全部類型</option>
                         <option value="密室逃脫">密室逃脫</option>
                         <option value="劇本殺">劇本殺</option>
@@ -3057,11 +3074,12 @@ ${url}
                         <option value="桌遊">桌遊</option>
                       </select>
 
-                      <select
-                        value={filterRegion}
-                        onChange={(e) => setFilterRegion(e.target.value)}
-                        className="w-full bg-[#EBE3D7] text-[#212121] text-xs px-3 py-2 rounded-xl border border-[#D1C7BB] outline-none focus:border-emerald-500 appearance-none"
-                      >
+                          <select
+                            value={filterRegion}
+                            onChange={(e) => setFilterRegion(e.target.value)}
+                            className="w-full bg-card text-foreground text-xs font-bold px-4 py-2.5 rounded-xl border-2 border-foreground/20 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 appearance-none transition-all cursor-pointer"
+                            style={{ boxShadow: '2px 2px 0px 0px #1E293B20' }}
+                          >
                         <option value="All">全部地區</option>
                         <option value="北部">北部</option>
                         <option value="中部">中部</option>
@@ -3070,40 +3088,44 @@ ${url}
                         <option value="離島">離島</option>
                       </select>
 
-                      <select
-                        value={filterStudio}
-                        onChange={(e) => setFilterStudio(e.target.value)}
-                        className="w-full bg-[#EBE3D7] text-[#212121] text-xs px-3 py-2 rounded-xl border border-[#D1C7BB] outline-none focus:border-emerald-500 appearance-none"
-                      >
+                          <select
+                            value={filterStudio}
+                            onChange={(e) => setFilterStudio(e.target.value)}
+                            className="w-full bg-card text-foreground text-xs font-bold px-4 py-2.5 rounded-xl border-2 border-foreground/20 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 appearance-none transition-all cursor-pointer"
+                            style={{ boxShadow: '2px 2px 0px 0px #1E293B20' }}
+                          >
                         <option value="All">全部工作室</option>
                         {availableStudios.filter(s => s !== 'All').map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
 
-                      <select
-                        value={filterMonth}
-                        onChange={(e) => setFilterMonth(e.target.value)}
-                        className="w-full bg-[#EBE3D7] text-[#212121] text-xs px-3 py-2 rounded-xl border border-[#D1C7BB] outline-none focus:border-emerald-500 appearance-none"
-                      >
+                          <select
+                            value={filterMonth}
+                            onChange={(e) => setFilterMonth(e.target.value)}
+                            className="w-full bg-card text-foreground text-xs font-bold px-4 py-2.5 rounded-xl border-2 border-foreground/20 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 appearance-none transition-all cursor-pointer"
+                            style={{ boxShadow: '2px 2px 0px 0px #1E293B20' }}
+                          >
                         <option value="All">全部月份</option>
                         {availableMonths.filter(m => m !== 'All').map(m => <option key={m} value={m}>{m}月</option>)}
                       </select>
 
-                      <select
-                        value={filterPrice}
-                        onChange={(e) => setFilterPrice(e.target.value)}
-                        className="w-full bg-[#EBE3D7] text-[#212121] text-xs px-3 py-2 rounded-xl border border-[#D1C7BB] outline-none focus:border-emerald-500 appearance-none"
-                      >
+                          <select
+                            value={filterPrice}
+                            onChange={(e) => setFilterPrice(e.target.value)}
+                            className="w-full bg-card text-foreground text-xs font-bold px-4 py-2.5 rounded-xl border-2 border-foreground/20 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 appearance-none transition-all cursor-pointer"
+                            style={{ boxShadow: '2px 2px 0px 0px #1E293B20' }}
+                          >
                         <option value="All">全部費用</option>
                         <option value="under500">$500以下</option>
                         <option value="500-1000">$500 - $1000</option>
                         <option value="above1000">$1000以上</option>
                       </select>
 
-                      <select
-                        value={filterSlots}
-                        onChange={(e) => setFilterSlots(e.target.value)}
-                        className="w-full bg-[#EBE3D7] text-[#212121] text-xs px-3 py-2 rounded-xl border border-[#D1C7BB] outline-none focus:border-emerald-500 appearance-none"
-                      >
+                          <select
+                            value={filterSlots}
+                            onChange={(e) => setFilterSlots(e.target.value)}
+                            className="w-full bg-card text-foreground text-xs font-bold px-4 py-2.5 rounded-xl border-2 border-foreground/20 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 appearance-none transition-all cursor-pointer"
+                            style={{ boxShadow: '2px 2px 0px 0px #1E293B20' }}
+                          >
                         <option value="All">所有狀態</option>
                         <option value="available">尚有名額</option>
                         <option value="full">已額滿</option>
@@ -3111,44 +3133,50 @@ ${url}
                         <option value="2">缺 2 人</option>
                         <option value="3+">缺 3 人以上</option>
                       </select>
-                    </div>
+                        </div>
 
-                    {/* 第二排：日期標籤與搜尋 (響應式 Flex) */}
-                    <div className="flex flex-col md:flex-row flex-wrap items-stretch md:items-center gap-2 md:gap-3">
-                      {['All', 'Today', 'Tomorrow', 'Weekend'].map((type) => (
-                        <button
-                          key={type}
-                          onClick={() => {
-                            setFilterDateType(type);
-                            setSelectedDateFilter(null); // 清除特定日期篩選
-                          }}
-                          className={`flex-1 min-w-[70px] px-3 py-2.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors text-center
-                    ${filterDateType === type
-                              ? 'bg-[#544B40] text-white shadow-lg'
-                              : 'bg-white text-[#212121] hover:bg-[#EBE3D7] border border-[#EBE3D7]'}`}
-                        >
-                          {type === 'All' ? '不限' : type === 'Today' ? '今天' : type === 'Tomorrow' ? '明天' : '週末'}
-                        </button>
-                      ))}
+                        {/* 第二排：日期標籤與搜尋 (響應式 Flex) */}
+                        <div className="flex flex-col md:flex-row flex-wrap items-stretch md:items-center gap-2 md:gap-3">
+                          {['All', 'Today', 'Tomorrow', 'Weekend'].map((type) => (
+                            <button
+                              key={type}
+                              onClick={() => {
+                                setFilterDateType(type);
+                                setSelectedDateFilter(null); // 清除特定日期篩選
+                              }}
+                              className={`flex-1 min-w-[70px] px-3 py-2.5 rounded-full text-xs font-bold whitespace-nowrap transition-all text-center border-2 ${
+                                filterDateType === type
+                                  ? 'bg-accent text-accent-foreground border-foreground'
+                                  : 'bg-card text-foreground border-foreground/20 hover:bg-tertiary hover:text-foreground hover:border-foreground'
+                              }`}
+                              style={filterDateType === type ? { boxShadow: '4px 4px 0px 0px #1E293B' } : { boxShadow: '2px 2px 0px 0px #1E293B20' }}
+                            >
+                              {type === 'All' ? '不限' : type === 'Today' ? '今天' : type === 'Tomorrow' ? '明天' : '週末'}
+                            </button>
+                          ))}
 
-                      <button
-                        onClick={() => setShowCalendar(true)}
-                        className="shrink-0 px-4 py-2.5 bg-[#EBE3D7] text-[#FF8C00] rounded-xl border border-[#D1C7BB] hover:bg-[#D1C7BB] active:scale-95 transition-all flex items-center justify-center gap-1.5 min-w-[80px]"
-                        aria-label="打開日曆"
-                      >
-                        <CalendarDays size={16} />
-                        <span className="text-xs font-medium">日曆</span>
-                      </button>
+                          <button
+                            onClick={() => setShowCalendar(true)}
+                            className="shrink-0 px-4 py-2.5 bg-card text-accent rounded-full border-2 border-foreground/20 hover:bg-tertiary hover:text-foreground hover:border-foreground active:scale-95 transition-all flex items-center justify-center gap-1.5 min-w-[80px] font-bold"
+                            style={{ boxShadow: '2px 2px 0px 0px #1E293B20' }}
+                            aria-label="打開日曆"
+                          >
+                            <CalendarDays size={16} strokeWidth={2.5} />
+                            <span className="text-xs">日曆</span>
+                          </button>
 
-                      <div className="relative w-full md:flex-1 mt-1 md:mt-0">
-                        <input
-                          type="text"
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          placeholder="搜尋活動、工作室、介紹..."
-                          className="w-full bg-bg-primary text-text-primary text-sm font-medium px-4 py-3 pl-10 rounded-xl border border-accent-beige/20 outline-none focus:border-accent-orange focus:ring-1 focus:ring-accent-orange/20 transition-all placeholder:text-text-secondary placeholder:font-normal shadow-inner"
-                        />
-                        <Search size={18} className="absolute left-3.5 top-3.5 text-text-secondary" />
+                          <div className="relative w-full md:flex-1 mt-1 md:mt-0">
+                            <input
+                              type="text"
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                              placeholder="搜尋活動、工作室、介紹..."
+                              className="w-full bg-card text-foreground text-sm font-medium px-4 py-3 pl-10 rounded-xl border-2 border-foreground/20 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 transition-all placeholder:text-muted-foreground placeholder:font-normal"
+                              style={{ boxShadow: '2px 2px 0px 0px #1E293B20' }}
+                            />
+                            <Search size={18} className="absolute left-3.5 top-3.5 text-muted-foreground" strokeWidth={2.5} />
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -3911,16 +3939,26 @@ ${url}
                         <label className="text-sm text-[#7A7A7A] font-medium">未滿團/基本價 <span className="text-red-500">*</span></label>
                         <div className="relative">
                           <span className="absolute left-4 top-3.5 text-[#7A7A7A]">$</span>
-                          <input required type="number" min="0" step="1" className="w-full bg-white border border-[#EBE3D7] rounded-xl pl-8 pr-4 py-3 text-[#212121] focus:border-emerald-500 outline-none"
-                            value={formData.price} onChange={e => setFormData({ ...formData, price: e.target.value })} placeholder="600" />
+                          <input required type="number" min="0" max="999999" step="1" className="w-full bg-white border border-[#EBE3D7] rounded-xl pl-8 pr-4 py-3 text-[#212121] focus:border-emerald-500 outline-none"
+                            value={formData.price} onChange={e => {
+                              const value = e.target.value;
+                              if (value === '' || (Number(value) >= 0 && Number(value) <= 999999)) {
+                                setFormData({ ...formData, price: value });
+                              }
+                            }} placeholder="600" />
                         </div>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-sm text-[#7A7A7A] font-medium">滿團優惠價 (選填)</label>
                         <div className="relative">
                           <span className="absolute left-4 top-3.5 text-[#7A7A7A]">$</span>
-                          <input type="number" min="0" step="1" className="w-full bg-white border border-[#EBE3D7] rounded-xl pl-8 pr-4 py-3 text-[#212121] focus:border-emerald-500 outline-none"
-                            value={formData.priceFull} onChange={e => setFormData({ ...formData, priceFull: e.target.value })} placeholder="550" />
+                          <input type="number" min="0" max="999999" step="1" className="w-full bg-white border border-[#EBE3D7] rounded-xl pl-8 pr-4 py-3 text-[#212121] focus:border-emerald-500 outline-none"
+                            value={formData.priceFull} onChange={e => {
+                              const value = e.target.value;
+                              if (value === '' || (Number(value) >= 0 && Number(value) <= 999999)) {
+                                setFormData({ ...formData, priceFull: value });
+                              }
+                            }} placeholder="550" />
                         </div>
                       </div>
                     </div>

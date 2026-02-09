@@ -465,8 +465,16 @@ export default function ProfilePage() {
       showToast('費用需為 0 或正整數', 'error');
       return;
     }
+    if (price > 999999) {
+      showToast('費用最高為 999999，請重新輸入', 'error');
+      return;
+    }
     if (!Number.isFinite(priceFull) || priceFull < 0) {
       showToast('滿團優惠價需為 0 或正整數', 'error');
+      return;
+    }
+    if (priceFull > 999999) {
+      showToast('滿團優惠價最高為 999999，請重新輸入', 'error');
       return;
     }
     if (builtInPlayers >= totalSlots) {
@@ -821,10 +829,16 @@ export default function ProfilePage() {
                   <input
                     type="number"
                     min="0"
+                    max="999999"
                     step="1"
                     className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
                     value={editEventForm.price}
-                    onChange={(e) => setEditEventForm((p) => ({ ...p, price: e.target.value }))}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '' || (Number(value) >= 0 && Number(value) <= 999999)) {
+                        setEditEventForm((p) => ({ ...p, price: value }));
+                      }
+                    }}
                   />
                 </div>
                 <div className="space-y-1.5 col-span-2 md:col-span-1">
@@ -832,10 +846,16 @@ export default function ProfilePage() {
                   <input
                     type="number"
                     min="0"
+                    max="999999"
                     step="1"
                     className="w-full bg-white border border-[#EBE3D7] rounded-xl px-4 py-3 text-[#212121] outline-none focus:border-[#FF8C00]"
                     value={editEventForm.priceFull}
-                    onChange={(e) => setEditEventForm((p) => ({ ...p, priceFull: e.target.value }))}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '' || (Number(value) >= 0 && Number(value) <= 999999)) {
+                        setEditEventForm((p) => ({ ...p, priceFull: value }));
+                      }
+                    }}
                   />
                 </div>
 

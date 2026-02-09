@@ -308,11 +308,11 @@ export default function HomepageCarousel() {
 
   if (status === 'loading') {
     return (
-      <div className="aspect-video rounded-[2.5rem] border border-accent-beige/30 overflow-hidden relative">
+      <div className="aspect-video rounded-xl overflow-hidden relative bg-card border-2 border-foreground" style={{ boxShadow: '8px 8px 0px 0px #E2E8F0' }}>
         <div className="absolute inset-0 carousel-loading-shimmer" />
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="flex items-center gap-3 text-text-secondary text-sm">
-            <div className="w-5 h-5 border-2 border-accent-orange/30 border-t-accent-orange rounded-full animate-spin" />
+          <div className="flex items-center gap-3 text-muted-foreground text-sm font-medium">
+            <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
             載入首頁內容…
           </div>
         </div>
@@ -322,7 +322,7 @@ export default function HomepageCarousel() {
 
   if (slides.length === 0 || status === 'error') {
     return (
-      <div className="aspect-video rounded-[2.5rem] border border-accent-beige/30 bg-white/70 flex items-center justify-center text-text-secondary text-sm">
+      <div className="aspect-video rounded-xl overflow-hidden bg-card border-2 border-foreground flex items-center justify-center text-muted-foreground text-sm font-medium" style={{ boxShadow: '8px 8px 0px 0px #E2E8F0' }}>
         目前沒有可顯示的內容
       </div>
     );
@@ -330,9 +330,9 @@ export default function HomepageCarousel() {
 
   if (imageError) {
     return (
-      <div className="aspect-video rounded-[2.5rem] border border-accent-beige/30 bg-white/70 flex flex-col items-center justify-center text-text-secondary text-sm p-4">
-        <div>圖片載入失敗</div>
-        <div className="mt-2 text-xs text-red-500 text-center">
+      <div className="aspect-video rounded-xl overflow-hidden bg-card border-2 border-foreground flex flex-col items-center justify-center text-muted-foreground text-sm p-4" style={{ boxShadow: '8px 8px 0px 0px #E2E8F0' }}>
+        <div className="font-medium">圖片載入失敗</div>
+        <div className="mt-2 text-xs text-secondary text-center">
           請檢查圖片 URL 是否正確
           <br />
           <span className="text-[10px] break-all">{slides[active]?.src?.substring(0, 80)}...</span>
@@ -347,17 +347,24 @@ export default function HomepageCarousel() {
 
   return (
     <div className="relative group">
-      {/* 主要輪播區域 */}
-      <div className="aspect-video rounded-[2.5rem] overflow-hidden border border-accent-beige/30 shadow-premium bg-black relative w-full">
+      {/* 主要輪播區域 - Playful Geometric 風格 */}
+      <div className="aspect-video rounded-xl overflow-hidden bg-black relative w-full border-2 border-foreground transition-all duration-300 hover:-rotate-1 hover:scale-[1.01]" style={{ boxShadow: '8px 8px 0px 0px #1E293B' }}>
+        {/* 幾何裝飾形狀 */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          <div className="absolute top-4 right-4 w-16 h-16 bg-accent rounded-full opacity-0 group-hover:opacity-20 transition-opacity duration-300" />
+          <div className="absolute bottom-4 left-4 w-12 h-12 bg-tertiary rounded-full opacity-0 group-hover:opacity-20 transition-opacity duration-300" />
+          <div className="absolute top-1/2 left-1/2 w-20 h-20 bg-secondary transform -translate-x-1/2 -translate-y-1/2 rotate-45 opacity-0 group-hover:opacity-10 transition-opacity duration-300" />
+        </div>
+
         {/* 內容切換動畫容器 */}
         <div
-          className={`w-full h-full transition-all duration-300 ease-out ${isTransitioning ? 'opacity-0 scale-[1.02]' : 'opacity-100 scale-100'
+          className={`w-full h-full transition-all duration-300 ${isTransitioning ? 'opacity-0 scale-[1.02]' : 'opacity-100 scale-100'
             }`}
         >
           {currentSlide.type === 'video' ? (
             <div className="w-full h-full relative" key={`video-${active}-${currentSlide.videoId}`}>
               {!isYouTubeReady && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white text-sm z-10">
+                <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white text-sm z-10 font-bold">
                   影片載入中…
                 </div>
               )}
@@ -367,7 +374,7 @@ export default function HomepageCarousel() {
             <>
               {imageLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-                  <div className="flex items-center gap-3 text-white text-sm">
+                  <div className="flex items-center gap-3 text-white text-sm font-bold">
                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     載入中...
                   </div>
@@ -396,47 +403,49 @@ export default function HomepageCarousel() {
           )}
         </div>
 
-        {/* 進度條（僅圖片時顯示） */}
+        {/* 進度條（僅圖片時顯示）- Playful Geometric 風格 */}
         {currentSlide.type === 'image' && slides.length > 1 && !imageLoading && (
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
             <div
               key={`progress-${progressKey.current}`}
-              className="h-full bg-white/80 carousel-progress"
+              className="h-full bg-accent carousel-progress rounded-full"
               style={{ '--progress-duration': `${IMAGE_DISPLAY_TIME}ms` }}
             />
           </div>
         )}
       </div>
 
-      {/* 導航按鈕 - hover 時顯示 */}
+      {/* 導航按鈕 - Playful Geometric 風格 */}
       {slides.length > 1 && (
         <>
           <button
             type="button"
             aria-label="上一張"
             onClick={goToPrev}
-            className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 hover:bg-white text-text-primary p-3 shadow-lg carousel-nav-btn opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0"
+            className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-card text-foreground p-3 carousel-nav-btn opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all duration-300 active:scale-95 border-2 border-foreground"
+            style={{ boxShadow: '4px 4px 0px 0px #1E293B' }}
           >
-            <ChevronLeft size={20} />
+            <ChevronLeft size={20} strokeWidth={2.5} />
           </button>
           <button
             type="button"
             aria-label="下一張"
             onClick={goToNext}
-            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/80 hover:bg-white text-text-primary p-3 shadow-lg carousel-nav-btn opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0"
+            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-card text-foreground p-3 carousel-nav-btn opacity-0 group-hover:opacity-100 translate-x-2 group-hover:translate-x-0 transition-all duration-300 active:scale-95 border-2 border-foreground"
+            style={{ boxShadow: '4px 4px 0px 0px #1E293B' }}
           >
-            <ChevronRight size={20} />
+            <ChevronRight size={20} strokeWidth={2.5} />
           </button>
 
-          {/* 指示點 */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2.5 px-4 py-2 rounded-full bg-black/30 backdrop-blur-sm">
+          {/* 指示點 - Playful Geometric 風格 */}
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2.5 px-4 py-2 rounded-full bg-foreground/90 border-2 border-foreground" style={{ boxShadow: '4px 4px 0px 0px #1E293B' }}>
             {slides.map((slide, index) => (
               <button
                 type="button"
                 key={slide.id}
-                className={`w-2.5 h-2.5 rounded-full border border-white/50 carousel-dot ${active === index
-                    ? 'bg-white carousel-dot-active'
-                    : 'bg-white/30 hover:bg-white/60'
+                className={`w-2.5 h-2.5 rounded-full border-2 border-white/50 carousel-dot transition-all duration-300 ${active === index
+                    ? 'bg-accent border-accent carousel-dot-active'
+                    : 'bg-white/30 hover:bg-white/60 active:scale-95'
                   }`}
                 onClick={() => goToSlide(index)}
                 aria-label={`切換至第 ${index + 1} 張`}
@@ -446,9 +455,9 @@ export default function HomepageCarousel() {
         </>
       )}
 
-      {/* 計數器標籤 */}
+      {/* 計數器標籤 - Playful Geometric 風格 */}
       {slides.length > 1 && (
-        <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+        <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full bg-foreground text-accent-foreground text-xs font-bold opacity-0 group-hover:opacity-100 transition-opacity duration-300 border-2 border-foreground" style={{ boxShadow: '4px 4px 0px 0px #1E293B' }}>
           {active + 1} / {slides.length}
         </div>
       )}
