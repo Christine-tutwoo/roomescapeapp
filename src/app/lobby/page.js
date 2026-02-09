@@ -3578,42 +3578,61 @@ ${url}
           <div className="space-y-4 animate-in fade-in duration-300">
             {/* Shared Wish Indicator */}
             {filterWishId && (
-              <div className="mb-4 p-4 bg-pink-500/10 border border-pink-500/20 rounded-xl flex items-center justify-between">
-                <div className="flex items-center text-pink-400 font-bold">
-                  <Sparkles size={20} className="mr-2 animate-pulse" />
-                  正在檢視分享的許願
+              <div className="mb-6 relative group animate-pop-in">
+                <div className="absolute -inset-1 bg-gradient-to-br from-secondary/20 via-secondary/10 to-transparent rounded-3xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <div className="relative card-premium p-5 flex items-center justify-between">
+                  <div className="flex items-center gap-3 text-secondary font-bold">
+                    <Sparkles size={20} className="animate-pulse" strokeWidth={2.5} />
+                    正在檢視分享的許願
+                  </div>
+                  <button
+                    onClick={() => {
+                      setFilterWishId(null);
+                      const url = new URL(window.location);
+                      url.searchParams.delete('wishId');
+                      window.history.pushState({}, '', url);
+                    }}
+                    className="btn-secondary group/btn inline-flex items-center justify-center gap-2 px-5 py-2.5 relative overflow-hidden"
+                  >
+                    <span className="absolute inset-0 bg-gradient-to-r from-tertiary/20 via-tertiary/10 to-transparent opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300" />
+                    <span className="relative z-10">查看所有許願</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => {
-                    setFilterWishId(null);
-                    const url = new URL(window.location);
-                    url.searchParams.delete('wishId');
-                    window.history.pushState({}, '', url);
-                  }}
-                  className="bg-pink-500 text-[#212121] px-4 py-2 rounded-lg text-sm font-bold hover:bg-pink-400 transition-colors"
-                >
-                  查看所有許願
-                </button>
               </div>
             )}
 
-            <div className="grid gap-4">
+            <div className="grid gap-6">
               {(filterWishId ? wishes.filter(w => w.id === filterWishId) : wishes).length === 0 ? (
-                <div className="text-center py-10">
-                  <p className="text-[#7A7A7A] mb-4">{filterWishId ? "找不到該許願，可能已被刪除" : "目前還沒有人許願"}</p>
-                  {!filterWishId && (
-                    <button onClick={() => { setActiveTab('lobby'); setCreateMode('wish'); openCreatePanel(); }} className="px-4 py-2 bg-pink-500 text-[#212121] rounded-xl text-sm font-bold shadow-lg shadow-pink-500/20 hover:bg-pink-400 transition-all">
-                      我來許第一個願！
-                    </button>
-                  )}
-                  {filterWishId && (
-                    <button onClick={() => setFilterWishId(null)} className="px-4 py-2 bg-[#EBE3D7] text-[#7A7A7A] rounded-xl text-sm font-bold hover:bg-[#D1C7BB] transition-all">
-                      查看所有許願
-                    </button>
-                  )}
+                <div className="relative group animate-pop-in">
+                  <div className="absolute -inset-1 bg-gradient-to-br from-secondary/20 via-secondary/10 to-transparent rounded-3xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                  <div className="relative card-premium p-12 text-center">
+                    <div className="flex flex-col items-center gap-4">
+                      <Sparkles size={48} className="text-muted-foreground/50" strokeWidth={2.5} />
+                      <p className="text-muted-foreground font-medium mb-4">{filterWishId ? "找不到該許願，可能已被刪除" : "目前還沒有人許願"}</p>
+                      {!filterWishId && (
+                        <button 
+                          onClick={() => { setActiveTab('lobby'); setCreateMode('wish'); openCreatePanel(); }} 
+                          className="btn-primary group/btn inline-flex items-center justify-center gap-2 px-6 py-3 relative overflow-hidden"
+                        >
+                          <span className="absolute inset-0 bg-gradient-to-r from-accent via-accent/90 to-accent opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300" />
+                          <Sparkles size={18} className="relative z-10 group-hover/btn:animate-wiggle transition-transform duration-300" strokeWidth={2.5} />
+                          <span className="relative z-10">我來許第一個願！</span>
+                        </button>
+                      )}
+                      {filterWishId && (
+                        <button 
+                          onClick={() => setFilterWishId(null)} 
+                          className="btn-secondary group/btn inline-flex items-center justify-center gap-2 px-6 py-3 relative overflow-hidden"
+                        >
+                          <span className="absolute inset-0 bg-gradient-to-r from-tertiary/20 via-tertiary/10 to-transparent opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300" />
+                          <span className="relative z-10">查看所有許願</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : (
-                (filterWishId ? wishes.filter(w => w.id === filterWishId) : wishes).map(wish => {
+                (filterWishId ? wishes.filter(w => w.id === filterWishId) : wishes).map((wish, index) => {
                   const currentCount = wish.wishCount || 1;
                   const targetCount = wish.targetCount || 4;
                   const isFull = currentCount >= targetCount;
@@ -3621,120 +3640,135 @@ ${url}
                   const wishLocationLink = getMapsUrl(wish.location);
 
                   return (
-                    <div key={wish.id} className="bg-white rounded-2xl p-4 border border-[#EBE3D7] shadow-lg relative overflow-hidden group hover:border-pink-500/30 transition-all">
-                      <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-pink-500 to-purple-500" />
+                    <div 
+                      key={wish.id} 
+                      className="relative group animate-pop-in"
+                      style={{ animationDelay: `${index * 0.1}s` }}
+                    >
+                      {/* 背景光暈 */}
+                      <div className="absolute -inset-1 bg-gradient-to-br from-secondary/20 via-secondary/10 to-transparent rounded-3xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                      
+                      <div className="relative card-premium p-6 group-hover:scale-[1.01] transition-all duration-300">
+                        {/* 裝飾元素 */}
+                        <div className="absolute top-4 right-4 w-20 h-20 bg-secondary/10 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        
+                        <div className="relative z-10 pl-4">
+                          {/* 左側裝飾線 */}
+                          <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-secondary to-tertiary rounded-l-3xl" />
 
-                      <div className="flex flex-wrap gap-2 mb-2 pl-3 items-center">
-                        <span className="text-[10px] font-medium text-[#212121] px-2 py-1 bg-pink-500/20 rounded border border-pink-500/30">
-                          {wish.category}
-                        </span>
-                        <span className="text-[10px] font-medium text-[#7A7A7A] px-2 py-1 bg-[#EBE3D7] rounded border border-[#D1C7BB]">
-                          {wish.region}
-                        </span>
-                        <span className="text-[10px] font-medium text-[#7A7A7A] px-2 py-1 bg-[#EBE3D7] rounded border border-[#D1C7BB]">
-                          {wish.type}
-                        </span>
-                        {isFull && (
-                          <span className="ml-auto text-xs font-bold bg-[#FFE4B5]/20 text-[#FF8C00] px-2 py-1 rounded-lg border border-[#FF8C00]/30 flex items-center animate-pulse">
-                            <BellRing size={12} className="mr-1" /> 人數已滿
-                          </span>
-                        )}
-                      </div>
-
-                      <h3 className="text-lg font-bold text-[#212121] mb-2 pl-3">{wish.title}</h3>
-
-                      <div className="pl-3 space-y-1 mb-4">
-                        <div className="text-sm font-medium text-[#7A7A7A] flex items-center">
-                          <MapPin size={14} className="mr-1.5 text-[#7A7A7A]" />
-                          {wishLocationLink ? (
-                            <a
-                              href={wishLocationLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[#FF8C00] hover:text-emerald-200 underline-offset-2 hover:underline transition-colors"
-                            >
-                              {wish.studio || '查看地圖'}
-                            </a>
-                          ) : (
-                            wish.studio
-                          )}
-                        </div>
-                        {wish.location && (
-                          <a
-                            href={wishLocationLink || '#'}
-                            target={wishLocationLink ? '_blank' : undefined}
-                            rel={wishLocationLink ? 'noopener noreferrer' : undefined}
-                            className="text-xs text-[#7A7A7A] flex items-center gap-1 hover:text-emerald-200 transition-colors"
-                          >
-                            <Navigation size={12} className="text-[#7A7A7A]" />
-                            {wish.location}
-                          </a>
-                        )}
-                      </div>
-
-                      {wish.description && (
-                        <div className="pl-3 mb-4">
-                          <div className="text-xs font-medium text-[#7A7A7A] mb-1">活動簡介</div>
-                          <p className="text-xs text-[#212121] leading-relaxed whitespace-pre-wrap break-words">
-                            {wish.description}
-                          </p>
-                        </div>
-                      )}
-
-                      {wish.hostNote && (
-                        <div className="pl-3 mb-4">
-                          <div className="text-xs font-medium text-[#7A7A7A] mb-1">主揪備註</div>
-                          <div className="text-xs text-[#212121] font-medium italic bg-[#F7F4EF] border border-[#EBE3D7] rounded-lg px-3 py-2 leading-relaxed whitespace-pre-wrap break-words">
-                            {wish.hostNote}
+                          <div className="flex flex-wrap gap-2 mb-4 items-center">
+                            <span className="text-xs font-bold text-foreground px-3 py-1.5 bg-secondary/20 rounded-xl border-2 border-secondary/30">
+                              {wish.category}
+                            </span>
+                            <span className="text-xs font-bold text-muted-foreground px-3 py-1.5 bg-muted/50 rounded-xl border-2 border-foreground/10">
+                              {wish.region}
+                            </span>
+                            <span className="text-xs font-bold text-muted-foreground px-3 py-1.5 bg-muted/50 rounded-xl border-2 border-foreground/10">
+                              {wish.type}
+                            </span>
+                            {isFull && (
+                              <span className="ml-auto text-xs font-bold bg-tertiary/20 text-tertiary px-3 py-1.5 rounded-xl border-2 border-tertiary/30 flex items-center gap-1.5 animate-pulse">
+                                <BellRing size={14} className="stroke-[2.5]" /> 人數已滿
+                              </span>
+                            )}
                           </div>
-                        </div>
-                      )}
 
-                      {/* Progress Bar */}
-                      <div className="pl-3 pr-1 mb-4">
-                        <div className="flex justify-between text-xs text-[#7A7A7A] mb-1">
-                          <span>集氣進度</span>
-                          <span className={isFull ? "text-[#FF8C00] font-bold" : "text-[#7A7A7A]"}>
-                            {currentCount} / {targetCount} 人
-                          </span>
-                        </div>
-                        <div className="w-full bg-[#EBE3D7] rounded-full h-1.5 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${isFull ? 'bg-yellow-400' : 'bg-pink-500'}`}
-                            style={{ width: `${Math.min((currentCount / targetCount) * 100, 100)}%` }}
-                          ></div>
-                        </div>
-                      </div>
+                          <h3 className="text-xl font-bold text-foreground mb-4 group-hover:text-secondary transition-colors duration-300">{wish.title}</h3>
 
-                      <div className="pl-3 flex items-center justify-between mt-2 pt-3 border-t border-[#EBE3D7]/50">
-                        <div className="text-xs text-[#7A7A7A] mr-auto">
-                          發起人：{wish.host}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleViewWishMembers(wish)}
-                            className="p-1.5 bg-[#EBE3D7] text-[#7A7A7A] rounded-lg hover:bg-[#D1C7BB] hover:text-[#FF8C00] transition-colors"
-                            title="查看成員"
-                          >
-                            <Users size={16} />
-                          </button>
-                          <button
-                            onClick={() => handleShareWish(wish)}
-                            className="p-1.5 bg-[#EBE3D7] text-[#7A7A7A] rounded-lg hover:bg-[#D1C7BB] hover:text-[#FF8C00] transition-colors"
-                            title="分享"
-                          >
-                            <Share2 size={16} />
-                          </button>
-                          <button
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all
-                                    ${isWished
-                                ? 'bg-pink-500 text-[#212121] border-pink-500 hover:bg-pink-600'
-                                : 'bg-pink-500/10 text-pink-400 border-pink-500/20 hover:bg-pink-500/20'}`}
-                            onClick={() => handleJoinWish(wish)}
-                          >
-                            <Heart size={14} className={isWished ? "fill-current" : ""} />
-                            {isWished ? `已集氣` : `集氣 +1`}
-                          </button>
+                          <div className="space-y-2 mb-4">
+                            <div className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                              <MapPin size={16} className="text-accent" strokeWidth={2.5} />
+                              {wishLocationLink ? (
+                                <a
+                                  href={wishLocationLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-accent hover:text-secondary underline-offset-2 hover:underline transition-colors font-medium"
+                                >
+                                  {wish.studio || '查看地圖'}
+                                </a>
+                              ) : (
+                                <span>{wish.studio}</span>
+                              )}
+                            </div>
+                            {wish.location && (
+                              <a
+                                href={wishLocationLink || '#'}
+                                target={wishLocationLink ? '_blank' : undefined}
+                                rel={wishLocationLink ? 'noopener noreferrer' : undefined}
+                                className="text-xs text-muted-foreground flex items-center gap-1.5 hover:text-accent transition-colors font-medium"
+                              >
+                                <Navigation size={14} className="stroke-[2.5]" />
+                                {wish.location}
+                              </a>
+                            )}
+                          </div>
+
+                          {wish.description && (
+                            <div className="mb-4 p-4 bg-muted/30 rounded-2xl border-2 border-foreground/10">
+                              <div className="text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wider">活動簡介</div>
+                              <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words font-medium">
+                                {wish.description}
+                              </p>
+                            </div>
+                          )}
+
+                          {wish.hostNote && (
+                            <div className="mb-4 p-4 bg-tertiary/10 rounded-2xl border-2 border-tertiary/20">
+                              <div className="text-xs font-bold text-tertiary mb-2 uppercase tracking-wider">主揪備註</div>
+                              <div className="text-sm text-foreground font-medium italic leading-relaxed whitespace-pre-wrap break-words">
+                                {wish.hostNote}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Progress Bar */}
+                          <div className="mb-6">
+                            <div className="flex justify-between text-sm font-bold mb-2">
+                              <span className="text-muted-foreground">集氣進度</span>
+                              <span className={isFull ? "text-tertiary" : "text-secondary"}>
+                                {currentCount} / {targetCount} 人
+                              </span>
+                            </div>
+                            <div className="w-full bg-muted rounded-full h-3 overflow-hidden border-2 border-foreground/10" style={{ boxShadow: '2px 2px 0px 0px #1E293B' }}>
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${isFull ? 'bg-tertiary' : 'bg-secondary'}`}
+                                style={{ width: `${Math.min((currentCount / targetCount) * 100, 100)}%` }}
+                              ></div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-4 border-t-2 border-foreground/10">
+                            <div className="text-sm text-muted-foreground font-medium">
+                              發起人：<span className="text-foreground font-bold">{wish.host}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleViewWishMembers(wish)}
+                                className="p-2 bg-muted/50 hover:bg-muted rounded-xl border-2 border-foreground/10 hover:border-accent/30 transition-all duration-300 group/btn"
+                                title="查看成員"
+                              >
+                                <Users size={18} className="text-muted-foreground group-hover/btn:text-accent transition-colors" strokeWidth={2.5} />
+                              </button>
+                              <button
+                                onClick={() => handleShareWish(wish)}
+                                className="p-2 bg-muted/50 hover:bg-muted rounded-xl border-2 border-foreground/10 hover:border-accent/30 transition-all duration-300 group/btn"
+                                title="分享"
+                              >
+                                <Share2 size={18} className="text-muted-foreground group-hover/btn:text-accent transition-colors" strokeWidth={2.5} />
+                              </button>
+                              <button
+                                className={`btn-primary group/btn inline-flex items-center justify-center gap-2 px-4 py-2 relative overflow-hidden ${
+                                  isWished ? 'bg-secondary' : ''
+                                }`}
+                                onClick={() => handleJoinWish(wish)}
+                              >
+                                <span className="absolute inset-0 bg-gradient-to-r from-secondary via-secondary/90 to-secondary opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300" />
+                                <Heart size={16} className={`relative z-10 ${isWished ? "fill-current" : ""} group-hover/btn:animate-wiggle transition-transform duration-300`} strokeWidth={2.5} />
+                                <span className="relative z-10 text-sm font-bold">{isWished ? `已集氣` : `集氣 +1`}</span>
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>

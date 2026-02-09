@@ -70,7 +70,7 @@ export default async function LandingPage({ searchParams }) {
 
             {/* 副標題 */}
             <p className="text-xl sm:text-2xl text-muted-foreground mb-10 max-w-3xl mx-auto leading-relaxed animate-pop-in-delay-2 font-medium">
-              一鍵開團、智能配對、主揪審核，讓每場密室都能快速成團
+              一鍵開團、快速搜尋、主揪審核，讓每場密室都能快速成團
               <br className="hidden sm:block" />
               不再擔心找不到隊友，專注享受解謎樂趣
             </p>
@@ -200,11 +200,11 @@ export default async function LandingPage({ searchParams }) {
                   
                   <div className="relative z-10">
                     <div className="w-16 h-16 bg-gradient-to-br from-tertiary to-tertiary/80 rounded-2xl flex items-center justify-center mb-6 border-2 border-foreground group-hover:animate-wiggle group-hover:scale-110 transition-all duration-300" style={{ boxShadow: '4px 4px 0px 0px #1E293B' }}>
-                      <Users size={32} className="text-foreground transition-transform duration-300 group-hover:scale-110" strokeWidth={2.5} />
+                      <Search size={32} className="text-foreground transition-transform duration-300 group-hover:scale-110" strokeWidth={2.5} />
                     </div>
-                    <h3 className="text-2xl font-bold text-foreground mb-3 group-hover:text-tertiary transition-colors duration-300">智能配對</h3>
+                    <h3 className="text-2xl font-bold text-foreground mb-3 group-hover:text-tertiary transition-colors duration-300">快速搜尋</h3>
                     <p className="text-muted-foreground font-medium leading-relaxed">
-                      根據時間、地點、主題自動配對，快速找到最適合的活動
+                      強大的篩選功能，根據時間、地點、主題快速找到最適合的活動
                     </p>
                   </div>
                 </div>
